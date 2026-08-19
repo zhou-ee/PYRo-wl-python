@@ -3,15 +3,30 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "wheel-legged-lqr"
-version = "0.2.0"
-description = "Fixed document-coordinate dynamics, discretization and discrete LQR"
+name = "wheel-leg-lqr"
+version = "0.1.0"
+description = "Runnable host-side LQR gain scheduling for the wheel-leg double-leg robot"
+readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["numpy>=1.24", "scipy>=1.10", "control>=0.10.2"]
+dependencies = [
+    "control>=0.10.2",
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "sympy>=1.12",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
 
 [project.scripts]
-wheel-legged-lqr = "wheel_legged_lqr.cli:main"
+wheelleg-schedule = "wheel_leg_lqr.gain_schedule:main"
+wheelleg-controllability = "wheel_leg_lqr.symbolic_controllability:main"
+wheelleg-bandwidth = "wheel_leg_lqr.analyze_bandwidth:main"
+wheelleg-optimize-qr = "wheel_leg_lqr.optimize_qr:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.pytest.ini_options]
-pythonpath = ["."]
+pythonpath = ["src"]
 testpaths = ["tests"]

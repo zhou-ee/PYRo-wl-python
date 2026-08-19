@@ -1,9 +1,0 @@
-{
-  "leg_length": 0.24,
-  "l_wp": 0.18405522559999998,
-  "l_ph": 0.055944774399999994,
-  "beta": 0.1,
-  "sample_time": 0.001,
-  "controllability_rank": 6,
-  "closed_loop_pole_radius": 0.998660947557716
-}
