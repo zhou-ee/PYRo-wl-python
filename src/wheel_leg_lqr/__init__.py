@@ -11,6 +11,7 @@ __all__ = [
     "artifacts",
     "control",
     "core",
+    "leso_schedule",
     "numeric_config",
     "numeric_model",
     "resolve_output_dir",
