@@ -32,6 +32,7 @@ __all__ = [
     "main",
     "make_leg_length_grid",
     "render_active_fl_u0_block",
+    "render_firmware_lqr_body",
     "render_header",
     "render_polynomial_matrices",
     "render_summary",
@@ -112,13 +113,13 @@ def compute_gain_node(l1: float, l2: float) -> GainNode:
 
 
 def compute_active_equilibrium_input(node: GainNode) -> np.ndarray:
-    """Return motor-side trim input after real-time gas-spring cancellation.
+    """Return motor-side trim input after passive gas-spring support.
 
-    ``node.linearization.equilibrium_input`` remains the total virtual force
-    used by the gas-spring-cancelled plant model and by closed-loop validation.
-    Only the exported actuator feedforward subtracts the passive equivalent
-    F_L for each leg.
+    The linear plant and LQR gain continue to use total virtual ``F_L``.
+    Only the exported motor feedforward subtracts the already-equivalent
+    passive gas-spring force on each leg.
     """
+
     active_input = node.linearization.equilibrium_input.copy()
     active_input[4] -= config.compute_gas_spring_force(node.l1)
     active_input[5] -= config.compute_gas_spring_force(node.l2)
@@ -198,8 +199,6 @@ def compute_gain_schedule(
     lam2_arr = np.array(lam2_list, dtype=float)
 
     raw_gains = np.array([node.gain for node in nodes])
-    # K/Ad/Bd use the original plant because the firmware cancels F_gas at
-    # the current measured length.  Only the motor-side U0 includes -F_gas.
     raw_inputs = np.array([compute_active_equilibrium_input(node) for node in nodes])
 
     gain_coefficients, fitted_gains = _fit_tensor_coefficients(
@@ -367,17 +366,20 @@ def _float32_fit_metrics(
 
 
 def render_active_fl_u0_block(coefficients: np.ndarray) -> str:
-    """Render the motor-side F_L trim declaration shared by all headers."""
+    """Render the active motor-side F_L equilibrium feedforward."""
+
     coefficients = np.asarray(coefficients, dtype=float).reshape(-1)
     if coefficients.size != 4:
         raise ValueError("active F_L U0 must contain four cubic coefficients")
-    fl_c0, fl_c1, fl_c2, fl_c3 = (f"{value:.10e}f" for value in coefficients)
+    fl_c0, fl_c1, fl_c2, fl_c3 = (
+        f"{value:.10e}f" for value in coefficients
+    )
     return "\n".join(
         [
-            "// Active motor F_L feedforward with real-time gas-spring cancellation.",
-            "// The plant model and K assume total virtual F_L; the firmware adds F_gas",
-            "// back before total-force limiting, then commands this active motor force.",
-            "// f_l_active = c0 + c1*lambda + c2*lambda^2 + c3*lambda^3 [N]",
+            "// Active motor F_L feedforward after passive gas-spring support.",
+            "// The plant model and K assume total virtual F_L; the supplied",
+            "// gas-spring polynomial is already equivalent F_L.",
+            "// f_l_active = f_l_total - F_gas(L)",
             "constexpr float FL_U0_POLY_COEF[U0_POLY_DEGREE + 1] = {",
             f"    {fl_c0}, {fl_c1}, {fl_c2},",
             f"    {fl_c3}}};",
@@ -385,18 +387,23 @@ def render_active_fl_u0_block(coefficients: np.ndarray) -> str:
     )
 
 
-def render_header(result: GainScheduleFit) -> str:
-    """生成与下位机完全兼容的 L1/L2 张量积增益调度 C/C++ 头文件。"""
+def _render_lqr_body(
+    result: GainScheduleFit,
+    *,
+    include_extended_state_dim: bool,
+    state_namespace: str,
+    input_namespace: str,
+    leg_state_name: str,
+    dot_leg_state_name: str,
+) -> str:
+    """Render LQR declarations without an include guard or ``#include``."""
+
     coefficients = result.gain_coefficients
     input_coefficients = result.input_coefficients
     q_vals = config.Q_DIAG.tolist()
     r_vals = config.R_DIAG.tolist()
 
     lines = [
-        "#ifndef __LQR_COEF_H__",
-        "#define __LQR_COEF_H__",
-        '#include "stdint.h"',
-        "",
         "/*",
         ' *  "Q_diag":',
     ]
@@ -423,15 +430,27 @@ def render_header(result: GainScheduleFit) -> str:
     deg2 = coefficients.shape[3] - 1
     u0_deg = input_coefficients.shape[1] - 1
 
+    dimension_lines = [
+        f"{'constexpr uint32_t STATE_DIM':<68} = {len(config.STATE_NAMES)};",
+        f"{'constexpr uint32_t INPUT_DIM':<68} = {len(config.INPUT_NAMES)};",
+    ]
+    if include_extended_state_dim:
+        dimension_lines.append(
+            f"{'constexpr uint32_t EXT_STATE_DIM':<68} = "
+            f"{len(config.STATE_NAMES) + len(config.INPUT_NAMES)};"
+        )
+    dimension_lines.extend(
+        [
+            f"{'constexpr uint32_t K_POLY_DEGREE':<68} = {deg1};",
+            f"{'constexpr uint32_t U0_POLY_DEGREE':<68} = {u0_deg};",
+            f"{'constexpr uint32_t BETA_TRIM_POLY_DEGREE':<68} = {len(config.LEG_COM_BETA_EQ_POLY) - 1};",
+        ]
+    )
     lines.extend(
         [
             " */",
             "",
-            f"{'constexpr uint32_t STATE_DIM':<68} = {len(config.STATE_NAMES)};",
-            f"{'constexpr uint32_t INPUT_DIM':<68} = {len(config.INPUT_NAMES)};",
-            f"{'constexpr uint32_t K_POLY_DEGREE':<68} = {deg1};",
-            f"{'constexpr uint32_t U0_POLY_DEGREE':<68} = {u0_deg};",
-            f"{'constexpr uint32_t BETA_TRIM_POLY_DEGREE':<68} = {len(config.LEG_COM_BETA_EQ_POLY) - 1};",
+            *dimension_lines,
             "",
             "// L1/L2 tensor-product polynomial coefficients over normalized leg lengths.",
             "// lambda_1 = clamp((L1 - 0.28f) / 0.10f, -1.0f, 1.0f)",
@@ -472,7 +491,7 @@ def render_header(result: GainScheduleFit) -> str:
             f"    {beta_c0}, {beta_c1}, {beta_c2},",
             f"    {beta_c3}}};",
             "",
-            "namespace lqr_state_def",
+            f"namespace {state_namespace}",
             "{",
             "enum : uint8_t",
             "{",
@@ -484,8 +503,8 @@ def render_header(result: GainScheduleFit) -> str:
             "    DOT_THETA,",
             "    PHI,",
             "    DOT_PHI,",
-            "    L_BAR,",
-            "    DOT_L_BAR,",
+            f"    {leg_state_name},",
+            f"    {dot_leg_state_name},",
             "    BETA_1,",
             "    DOT_BETA_1,",
             "    BETA_2,",
@@ -493,7 +512,7 @@ def render_header(result: GainScheduleFit) -> str:
             "};",
             "}",
             "",
-            "namespace lqr_input_def",
+            f"namespace {input_namespace}",
             "{",
             "enum : uint8_t",
             "{",
@@ -505,12 +524,47 @@ def render_header(result: GainScheduleFit) -> str:
             "    F_L2,",
             "};",
             "}",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def render_firmware_lqr_body(result: GainScheduleFit) -> str:
+    """Render the LQR section used by the combined firmware ``coef.h``."""
+
+    return _render_lqr_body(
+        result,
+        include_extended_state_dim=True,
+        state_namespace="state_def",
+        input_namespace="input_def",
+        leg_state_name="L",
+        dot_leg_state_name="DOT_L",
+    )
+
+
+def render_header(result: GainScheduleFit) -> str:
+    """生成与下位机完全兼容的 L1/L2 张量积增益调度 C/C++ 头文件。"""
+
+    body = _render_lqr_body(
+        result,
+        include_extended_state_dim=False,
+        state_namespace="lqr_state_def",
+        input_namespace="lqr_input_def",
+        leg_state_name="L_BAR",
+        dot_leg_state_name="DOT_L_BAR",
+    )
+    return "\n".join(
+        [
+            "#ifndef __LQR_COEF_H__",
+            "#define __LQR_COEF_H__",
+            '#include "stdint.h"',
+            "",
+            body,
             "",
             "#endif",
             "",
         ]
     )
-    return "\n".join(lines)
 
 
 def render_summary(result: GainScheduleFit) -> str:
@@ -529,7 +583,7 @@ def render_summary(result: GainScheduleFit) -> str:
         f"- Max Float32 Discrete Spectral Radius: `{max_float_radius:.9f}`",
         f"- Max Float32 Gain Rounding Error: `{max_float_gain_error:.6e}`",
         "- Controlled generalized coordinate: `L_bar=(L1+L2)/2`, with derived height not included in the LQR state",
-        "- Gas spring: cancelled at current leg length; `A/B/K` are unchanged and exported `FL_U0` is active motor force (`F_total-F_gas`)",
+        "- Gas spring: `A/B/K` use total virtual `F_L`; exported `FL_U0` is active motor force (`F_total-F_gas`)",
         "- State order: `x, dx, psi, dpsi, theta, dtheta, phi, dphi, L_bar, dL_bar, beta1, dbeta1, beta2, dbeta2`",
         f"- Saturated recovery peak state error: `{result.saturation_validation.max_state_abs:.6e}`",
         f"- Saturated recovery final state error: `{result.saturation_validation.max_final_state_abs:.6e}`",

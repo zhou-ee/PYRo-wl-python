@@ -1,15 +1,11 @@
 """Reusable control primitives."""
 
 from .leso import (
-    DEFAULT_LESO_DESIGN,
-    N_AUGMENTED,
-    N_DISTURBANCE,
-    LesoDesignConfig,
-    LesoEstimate,
-    LesoStepResult,
+    DEFAULT_DISTURBANCE_POLE,
+    DEFAULT_STATE_POLE,
+    LesoCorrection,
     build_augmented_model,
-    design_leso_gain,
-    initialize_leso,
+    design_leso_correction,
     observer_error_spectral_radius,
     step_leso_split,
 )
@@ -23,19 +19,15 @@ from .saturation import (
 )
 
 __all__ = [
-    "DEFAULT_LESO_DESIGN",
-    "N_AUGMENTED",
-    "N_DISTURBANCE",
-    "LesoDesignConfig",
-    "LesoEstimate",
-    "LesoStepResult",
+    "DEFAULT_DISTURBANCE_POLE",
+    "DEFAULT_STATE_POLE",
+    "LesoCorrection",
     "SaturationValidation",
     "build_augmented_model",
     "controllability_rank",
     "default_initial_errors",
-    "design_leso_gain",
+    "design_leso_correction",
     "discretize_state_space",
-    "initialize_leso",
     "observer_error_spectral_radius",
     "simulate_saturated_closed_loop",
     "simulate_saturated_closed_loop_batch",

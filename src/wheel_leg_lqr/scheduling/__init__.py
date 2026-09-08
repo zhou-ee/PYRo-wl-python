@@ -1,12 +1,13 @@
 """The project's L1/L2 gain-scheduling workflow."""
 
 from .leso_schedule import (
+    DEFAULT_FL_COMPENSATION_GAIN,
     LesoScheduleFit,
-    SparseTensorSchedule,
     compute_leso_schedule,
-    render_leso_summary,
-    save_leso_result,
-    step_scheduled_leso,
+    render_combined_coef_header,
+    render_firmware_coefficients,
+    render_firmware_fit_block,
+    save_result as save_leso_result,
 )
 from .leg_length_schedule import (
     GainNode,
@@ -16,18 +17,25 @@ from .leg_length_schedule import (
     evaluate_fitted_gain,
     save_result,
 )
+from .pod_chebyshev import (
+    SymmetricPodChebyshevSchedule,
+    fit_symmetric_pod_chebyshev,
+)
 
 __all__ = [
     "GainNode",
     "GainScheduleFit",
+    "DEFAULT_FL_COMPENSATION_GAIN",
     "LesoScheduleFit",
-    "SparseTensorSchedule",
+    "SymmetricPodChebyshevSchedule",
     "compute_gain_node",
     "compute_gain_schedule",
     "compute_leso_schedule",
     "evaluate_fitted_gain",
-    "render_leso_summary",
+    "fit_symmetric_pod_chebyshev",
+    "render_combined_coef_header",
+    "render_firmware_coefficients",
+    "render_firmware_fit_block",
     "save_leso_result",
     "save_result",
-    "step_scheduled_leso",
 ]

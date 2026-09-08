@@ -1,4 +1,4 @@
-"""Double-click runner for the sparse six-disturbance LESO schedule."""
+"""Double-click runner for the POD/Chebyshev six-disturbance LESO schedule."""
 
 from __future__ import annotations
 

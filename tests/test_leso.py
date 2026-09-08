@@ -1,121 +1,118 @@
 import numpy as np
 
-from wheel_leg_lqr import numeric_config as config
 from wheel_leg_lqr.control.leso import (
-    DEFAULT_LESO_DESIGN,
-    N_AUGMENTED,
-    LesoEstimate,
     build_augmented_model,
-    design_leso_gain,
-    initialize_leso,
+    design_leso_correction,
+    observer_error_matrix,
     observer_error_spectral_radius,
     step_leso_split,
 )
 from wheel_leg_lqr.gain_schedule import compute_gain_node
+from wheel_leg_lqr.numeric_config import N_U, N_X
+from wheel_leg_lqr.scheduling.leso_schedule import INPUT_EXCHANGE, STATE_EXCHANGE
 
 
-def _nominal_design():
-    node = compute_gain_node(0.28, 0.28)
-    gain = design_leso_gain(node.Ad, node.Bd)
-    return node.Ad, node.Bd, gain
+def test_analytic_leso_has_the_requested_augmented_poles():
+    node = compute_gain_node(0.23, 0.34)
+    correction = design_leso_correction(node.Ad, node.Bd)
 
-
-def test_six_disturbance_augmented_model_is_observable_and_stable():
-    physical_ad, physical_bd, gain = _nominal_design()
-    augmented_a, augmented_b, output = build_augmented_model(
-        physical_ad,
-        physical_bd,
+    assert np.linalg.matrix_rank(node.Bd) == N_U
+    poles = np.sort_complex(
+        np.linalg.eigvals(
+            observer_error_matrix(
+                node.Ad,
+                node.Bd,
+                correction.state_gain,
+                correction.disturbance_gain,
+            )
+        )
     )
-    observability = np.vstack(
-        [output @ np.linalg.matrix_power(augmented_a, power) for power in range(N_AUGMENTED)]
+    expected = np.sort_complex(
+        np.asarray(
+            [correction.unmatched_state_pole] * (N_X - N_U)
+            + [correction.state_pole] * N_U
+            + [correction.disturbance_pole] * N_U
+        )
     )
+    np.testing.assert_allclose(poles, expected, atol=2.0e-10, rtol=0.0)
+    assert observer_error_spectral_radius(
+        node.Ad,
+        node.Bd,
+        correction.state_gain,
+        correction.disturbance_gain,
+    ) < 1.0
 
-    assert augmented_a.shape == (20, 20)
-    assert augmented_b.shape == (20, 6)
-    assert output.shape == (14, 20)
-    assert gain.shape == (20, 14)
-    assert np.linalg.matrix_rank(observability) == 20
-    assert observer_error_spectral_radius(physical_ad, physical_bd, gain) < 1.0
 
-
-def test_split_update_matches_full_augmented_matrix_update():
-    physical_ad, physical_bd, gain = _nominal_design()
-    augmented_a, augmented_b, output = build_augmented_model(
-        physical_ad,
-        physical_bd,
+def test_split_update_matches_the_augmented_observer_equation():
+    node = compute_gain_node(0.21, 0.37)
+    correction = design_leso_correction(node.Ad, node.Bd)
+    augmented_state, augmented_input, output = build_augmented_model(
+        node.Ad, node.Bd
     )
-    rng = np.random.default_rng(42)
-    estimate = LesoEstimate(
-        state=rng.normal(scale=0.05, size=config.N_X),
-        disturbance=rng.normal(scale=0.02, size=config.N_U),
+    observer_gain = np.vstack(
+        [correction.state_gain, correction.disturbance_gain]
     )
-    measured_state = rng.normal(scale=0.01, size=config.N_X)
-    applied_delta = rng.normal(scale=0.1, size=config.N_U)
+    rng = np.random.default_rng(20260902)
+    estimated_state = rng.normal(size=N_X)
+    estimated_disturbance = rng.normal(size=N_U)
+    measured_state = rng.normal(size=N_X)
+    applied_input = rng.normal(size=N_U)
 
-    result = step_leso_split(
-        estimate,
+    next_state, next_disturbance = step_leso_split(
+        estimated_state,
+        estimated_disturbance,
         measured_state,
-        applied_delta,
-        physical_ad,
-        physical_bd,
-        gain,
+        applied_input,
+        node.Ad,
+        node.Bd,
+        correction.state_gain,
+        correction.disturbance_gain,
     )
-    augmented_estimate = np.concatenate([estimate.state, estimate.disturbance])
+    augmented_estimate = np.concatenate(
+        [estimated_state, estimated_disturbance]
+    )
     expected = (
-        augmented_a @ augmented_estimate
-        + augmented_b @ applied_delta
-        + gain @ (measured_state - output @ augmented_estimate)
+        augmented_state @ augmented_estimate
+        + augmented_input @ applied_input
+        + observer_gain @ (measured_state - output @ augmented_estimate)
+    )
+    np.testing.assert_allclose(
+        np.concatenate([next_state, next_disturbance]),
+        expected,
+        atol=2.0e-13,
+        rtol=2.0e-13,
     )
 
-    np.testing.assert_allclose(result.estimate.state, expected[: config.N_X])
-    np.testing.assert_allclose(result.estimate.disturbance, expected[config.N_X :])
 
-
-def test_initialization_and_physical_disturbance_limits():
-    physical_ad, physical_bd, gain = _nominal_design()
-    estimate = initialize_leso(np.zeros(config.N_X))
-    large_measurement = np.ones(config.N_X)
-    limits = np.array([0.2, 0.2, 1.0, 1.0, 5.0, 5.0])
-
-    result = step_leso_split(
-        estimate,
-        large_measurement,
-        np.zeros(config.N_U),
-        physical_ad,
-        physical_bd,
-        gain,
-        disturbance_limits=limits,
-    )
-
-    assert np.all(np.abs(result.estimate.physical_disturbance()) <= limits + 1e-12)
-
-
-def test_all_six_disturbances_converge_in_compensated_closed_loop():
-    node = compute_gain_node(0.28, 0.28)
-    design = DEFAULT_LESO_DESIGN
-    gain = design_leso_gain(node.Ad, node.Bd, design)
-    true_disturbance = np.array([0.098, -0.065, 2.4, -1.8, 15.0, -12.0])
-    state = np.zeros(config.N_X)
-    estimate = initialize_leso(np.zeros(config.N_X))
-
-    for _ in range(2000):
-        physical_input = -node.gain @ state - estimate.disturbance
-        result = step_leso_split(
-            estimate,
-            state,
-            physical_input,
-            node.Ad,
-            node.Bd,
-            gain,
-        )
-        state = node.Ad @ state + node.Bd @ (
-            physical_input + true_disturbance
-        )
-        estimate = result.estimate
+def test_analytic_design_preserves_left_right_exchange_symmetry():
+    direct = compute_gain_node(0.22, 0.35)
+    exchanged = compute_gain_node(0.35, 0.22)
+    direct_correction = design_leso_correction(direct.Ad, direct.Bd)
+    exchanged_correction = design_leso_correction(exchanged.Ad, exchanged.Bd)
 
     np.testing.assert_allclose(
-        estimate.disturbance,
-        true_disturbance,
-        atol=1e-5,
+        exchanged.Ad,
+        STATE_EXCHANGE @ direct.Ad @ STATE_EXCHANGE.T,
+        atol=2.0e-12,
+        rtol=2.0e-12,
     )
-    assert np.max(np.abs(state)) < 1e-3
+    np.testing.assert_allclose(
+        exchanged.Bd,
+        STATE_EXCHANGE @ direct.Bd @ INPUT_EXCHANGE.T,
+        atol=2.0e-12,
+        rtol=2.0e-12,
+    )
+    np.testing.assert_allclose(
+        exchanged_correction.state_gain,
+        STATE_EXCHANGE @ direct_correction.state_gain @ STATE_EXCHANGE.T,
+        atol=2.0e-12,
+        rtol=2.0e-12,
+    )
+    np.testing.assert_allclose(
+        exchanged_correction.disturbance_gain,
+        INPUT_EXCHANGE
+        @ direct_correction.disturbance_gain
+        @ STATE_EXCHANGE.T,
+        atol=2.0e-9,
+        rtol=2.0e-10,
+    )

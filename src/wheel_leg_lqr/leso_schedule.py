@@ -1,4 +1,4 @@
-"""Public sparse L1/L2 LESO scheduling API."""
+"""Public POD/Chebyshev L1/L2 LESO scheduling API."""
 
 from .scheduling.leso_schedule import *
 
