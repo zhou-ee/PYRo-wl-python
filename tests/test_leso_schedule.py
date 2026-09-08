@@ -7,6 +7,8 @@ from wheel_leg_lqr import numeric_config as config
 from wheel_leg_lqr.control.leso import initialize_leso, step_leso_split
 from wheel_leg_lqr.scheduling.leso_schedule import (
     compute_leso_schedule,
+    refresh_combined_header_active_u0,
+    replace_combined_header_active_u0,
     save_leso_result,
     step_scheduled_leso,
 )
@@ -101,3 +103,45 @@ def test_python_artifacts_round_trip(leso_schedule, tmp_path):
     assert "state_scales" not in archive.files
     assert "input_scales" not in archive.files
     assert report["max_float32_observer_spectral_radius"] < 1.0
+
+
+def test_combined_header_u0_refresh_is_narrow_and_idempotent(tmp_path):
+    stale_header = """#ifndef __COEF_H__
+#define __COEF_H__
+
+constexpr float K_POLY_COEF[] = {42.0f};
+
+// Leg thrust static equilibrium feedforward polynomial.
+// f_l_trim is the total force.
+constexpr float FL_U0_POLY_COEF[U0_POLY_DEGREE + 1] = {
+    1.0059390686e+02f, 4.6173437895e-01f, -2.8751243380e-01f,
+    1.3612422702e-02f};
+
+constexpr float LESO_G_MEAN[] = {7.0f};
+#endif
+"""
+    active_coefficients = np.array(
+        [-19.273645585, -36.678763749, 4.6249485386, -2.6899538281]
+    )
+    updated = replace_combined_header_active_u0(
+        stale_header,
+        active_coefficients,
+    )
+    assert "-1.9273645585e+01f" in updated
+    assert "-3.6678763749e+01f" in updated
+    assert "Active motor F_L feedforward" in updated
+    assert "constexpr float K_POLY_COEF[] = {42.0f};" in updated
+    assert "constexpr float LESO_G_MEAN[] = {7.0f};" in updated
+    assert replace_combined_header_active_u0(updated, active_coefficients) == updated
+
+    header_path = tmp_path / "coef.h"
+    header_path.write_text(stale_header, encoding="utf-8")
+    assert refresh_combined_header_active_u0(
+        header_path,
+        active_coefficients,
+    )
+    assert header_path.read_text(encoding="utf-8") == updated
+    assert not refresh_combined_header_active_u0(
+        tmp_path / "missing.h",
+        active_coefficients,
+    )

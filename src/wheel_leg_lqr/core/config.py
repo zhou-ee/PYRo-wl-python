@@ -101,6 +101,37 @@ class DoubleLegParameters:
 
 PARAMETERS = DoubleLegParameters()
 
+# 300 N gas-spring equivalent F_L fit used by the firmware.  Coefficients are
+# ascending powers of lambda = clamp((L - 0.28) / 0.10, -1, 1).
+GAS_SPRING_LENGTH_CENTER: float = 0.28
+GAS_SPRING_LENGTH_SCALE: float = 0.10
+GAS_SPRING_FORCE_POLY_COEF: tuple[float, float, float, float] = (
+    119.867552440332,
+    37.1404981279233,
+    -4.91246097241044,
+    2.70356625079196,
+)
+
+
+def compute_gas_spring_force(leg_length: float) -> float:
+    """Return passive gas-spring equivalent F_L in newtons.
+
+    The lower controller cancels this force from the motor command every
+    cycle.  It therefore changes the exported active feedforward only, not
+    the plant linearization or LQR gain.
+    """
+    normalized_length = np.clip(
+        (float(leg_length) - GAS_SPRING_LENGTH_CENTER)
+        / GAS_SPRING_LENGTH_SCALE,
+        -1.0,
+        1.0,
+    )
+    force = 0.0
+    for coefficient in reversed(GAS_SPRING_FORCE_POLY_COEF):
+        force = force * normalized_length + coefficient
+    return float(force)
+
+
 # 腿部质心偏移多项式拟合系数 (来自清洗后重心.xlsx，升幂: c0 + c1*L + c2*L^2 + c3*L^3)
 LEG_COM_LWP_POLY: tuple[float, float, float, float] = (
     0.05806884,

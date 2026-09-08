@@ -25,11 +25,13 @@ from .polynomial import evaluate_tensor_polynomial, fit_tensor_coefficients, ten
 __all__ = [
     "GainNode",
     "GainScheduleFit",
+    "compute_active_equilibrium_input",
     "compute_gain_node",
     "compute_gain_schedule",
     "evaluate_fitted_gain",
     "main",
     "make_leg_length_grid",
+    "render_active_fl_u0_block",
     "render_header",
     "render_polynomial_matrices",
     "render_summary",
@@ -109,6 +111,20 @@ def compute_gain_node(l1: float, l2: float) -> GainNode:
     )
 
 
+def compute_active_equilibrium_input(node: GainNode) -> np.ndarray:
+    """Return motor-side trim input after real-time gas-spring cancellation.
+
+    ``node.linearization.equilibrium_input`` remains the total virtual force
+    used by the gas-spring-cancelled plant model and by closed-loop validation.
+    Only the exported actuator feedforward subtracts the passive equivalent
+    F_L for each leg.
+    """
+    active_input = node.linearization.equilibrium_input.copy()
+    active_input[4] -= config.compute_gas_spring_force(node.l1)
+    active_input[5] -= config.compute_gas_spring_force(node.l2)
+    return active_input
+
+
 def _build_tensor_design_matrix(
     lam1: np.ndarray,
     lam2: np.ndarray,
@@ -182,7 +198,9 @@ def compute_gain_schedule(
     lam2_arr = np.array(lam2_list, dtype=float)
 
     raw_gains = np.array([node.gain for node in nodes])
-    raw_inputs = np.array([node.linearization.equilibrium_input for node in nodes])
+    # K/Ad/Bd use the original plant because the firmware cancels F_gas at
+    # the current measured length.  Only the motor-side U0 includes -F_gas.
+    raw_inputs = np.array([compute_active_equilibrium_input(node) for node in nodes])
 
     gain_coefficients, fitted_gains = _fit_tensor_coefficients(
         lam1_arr, lam2_arr, raw_gains, deg1, deg2
@@ -348,6 +366,25 @@ def _float32_fit_metrics(
     return max(radii), max(gain_errors)
 
 
+def render_active_fl_u0_block(coefficients: np.ndarray) -> str:
+    """Render the motor-side F_L trim declaration shared by all headers."""
+    coefficients = np.asarray(coefficients, dtype=float).reshape(-1)
+    if coefficients.size != 4:
+        raise ValueError("active F_L U0 must contain four cubic coefficients")
+    fl_c0, fl_c1, fl_c2, fl_c3 = (f"{value:.10e}f" for value in coefficients)
+    return "\n".join(
+        [
+            "// Active motor F_L feedforward with real-time gas-spring cancellation.",
+            "// The plant model and K assume total virtual F_L; the firmware adds F_gas",
+            "// back before total-force limiting, then commands this active motor force.",
+            "// f_l_active = c0 + c1*lambda + c2*lambda^2 + c3*lambda^3 [N]",
+            "constexpr float FL_U0_POLY_COEF[U0_POLY_DEGREE + 1] = {",
+            f"    {fl_c0}, {fl_c1}, {fl_c2},",
+            f"    {fl_c3}}};",
+        ]
+    )
+
+
 def render_header(result: GainScheduleFit) -> str:
     """生成与下位机完全兼容的 L1/L2 张量积增益调度 C/C++ 头文件。"""
     coefficients = result.gain_coefficients
@@ -419,15 +456,9 @@ def render_header(result: GainScheduleFit) -> str:
     lines.append("};")
     lines.append("")
 
-    fl_u0_row = input_coefficients[4, :, 0]
-    fl_c0, fl_c1, fl_c2, fl_c3 = (f"{v:.10e}f" for v in fl_u0_row)
     lines.extend(
         [
-            "// Leg thrust static equilibrium feedforward polynomial (ascending powers of lambda):",
-            "// f_l_trim = c0 + c1*lambda + c2*lambda^2 + c3*lambda^3 [N]",
-            "constexpr float FL_U0_POLY_COEF[U0_POLY_DEGREE + 1] = {",
-            f"    {fl_c0}, {fl_c1}, {fl_c2},",
-            f"    {fl_c3}}};",
+            render_active_fl_u0_block(input_coefficients[4, :, 0]),
             "",
         ]
     )
@@ -498,6 +529,7 @@ def render_summary(result: GainScheduleFit) -> str:
         f"- Max Float32 Discrete Spectral Radius: `{max_float_radius:.9f}`",
         f"- Max Float32 Gain Rounding Error: `{max_float_gain_error:.6e}`",
         "- Controlled generalized coordinate: `L_bar=(L1+L2)/2`, with derived height not included in the LQR state",
+        "- Gas spring: cancelled at current leg length; `A/B/K` are unchanged and exported `FL_U0` is active motor force (`F_total-F_gas`)",
         "- State order: `x, dx, psi, dpsi, theta, dtheta, phi, dphi, L_bar, dL_bar, beta1, dbeta1, beta2, dbeta2`",
         f"- Saturated recovery peak state error: `{result.saturation_validation.max_state_abs:.6e}`",
         f"- Saturated recovery final state error: `{result.saturation_validation.max_final_state_abs:.6e}`",

@@ -2,11 +2,31 @@ import numpy as np
 from wheel_leg_lqr import numeric_config as config
 from wheel_leg_lqr.gain_schedule import (
     _float32_fit_metrics,
+    compute_active_equilibrium_input,
     compute_gain_node,
     compute_gain_schedule,
     evaluate_fitted_gain,
     render_header,
 )
+
+
+def test_active_u0_subtracts_gas_spring_without_changing_model():
+    node = compute_gain_node(0.23, 0.34)
+    active_input = compute_active_equilibrium_input(node)
+    np.testing.assert_allclose(
+        active_input[:4],
+        node.linearization.equilibrium_input[:4],
+        atol=1e-12,
+    )
+    np.testing.assert_allclose(
+        active_input[4:],
+        node.linearization.equilibrium_input[4:]
+        - [
+            config.compute_gas_spring_force(node.l1),
+            config.compute_gas_spring_force(node.l2),
+        ],
+        atol=1e-12,
+    )
 
 
 def test_single_node_is_controllable_and_dlqr_stable():
@@ -66,6 +86,8 @@ def test_header_rendering_format():
     assert "constexpr uint32_t K_POLY_DEGREE" in header_text
     assert "constexpr float K_POLY_COEF" in header_text
     assert "constexpr float FL_U0_POLY_COEF" in header_text
+    assert "Active motor F_L feedforward" in header_text
+    assert "plant model and K assume total virtual F_L" in header_text
     assert "constexpr float BETA_TRIM_POLY_COEF" in header_text
     assert "namespace lqr_state_def" in header_text
     assert "namespace lqr_input_def" in header_text

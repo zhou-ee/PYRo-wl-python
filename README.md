@@ -53,6 +53,7 @@ wheelleg-schedule --exhaustive-validation --output-dir data/generated
 
 - `core.config` 是物理常量、状态/输入顺序和权重矩阵的唯一来源。
 - `core.model` 只负责几何、质量矩阵、重力、输入映射和静态线性化。
+- 气弹簧由下位机按当前腿长实时抵消，因此不进入 `A/B/K`；调度器只把导出的主动腿力前馈改为 `FL_U0=F_L,total-F_gas(L)`。
 - `control` 提供不依赖调度策略的通用控制运算。
 - `scheduling` 只组织 L1/L2 配平点扫描、张量积拟合和验证；文件格式由调度模块调用 `artifacts.io` 完成。
 - 生成物必须写到显式 `--output-dir`，不要覆盖源码或参考数据。

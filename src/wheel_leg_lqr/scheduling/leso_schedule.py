@@ -22,7 +22,13 @@ from ..control.leso import (
     observer_error_spectral_radius,
 )
 from ..core import config
-from .leg_length_schedule import GainNode, compute_gain_node, make_leg_length_grid
+from .leg_length_schedule import (
+    GainNode,
+    compute_gain_node,
+    compute_gain_schedule,
+    make_leg_length_grid,
+    render_active_fl_u0_block,
+)
 from .polynomial import fit_tensor_coefficients
 
 
@@ -521,6 +527,51 @@ def save_leso_result(result: LesoScheduleFit, output_dir: Path) -> None:
     )
 
 
+def replace_combined_header_active_u0(
+    header_text: str,
+    coefficients: np.ndarray,
+) -> str:
+    """Replace only the F_L U0 paragraph in an existing combined ``coef.h``.
+
+    The current LESO branch does not regenerate the POD/Chebyshev declarations
+    contained in that header.  Keeping the replacement narrowly scoped avoids
+    silently changing its K or LESO coefficient tables while still ensuring
+    that running the LESO exporter cannot leave a stale, total-force U0 behind.
+    """
+    declaration = "constexpr float FL_U0_POLY_COEF[U0_POLY_DEGREE + 1]"
+    if header_text.count(declaration) != 1:
+        raise ValueError("combined coef.h must contain exactly one FL_U0 declaration")
+    declaration_start = header_text.index(declaration)
+    paragraph_separator = header_text.rfind("\n\n", 0, declaration_start)
+    if paragraph_separator < 0:
+        raise ValueError("FL_U0 declaration must be preceded by a paragraph separator")
+    declaration_end = header_text.find("};", declaration_start)
+    if declaration_end < 0:
+        raise ValueError("FL_U0 declaration is not terminated")
+    declaration_end += 2
+    return (
+        header_text[: paragraph_separator + 2]
+        + render_active_fl_u0_block(coefficients)
+        + header_text[declaration_end:]
+    )
+
+
+def refresh_combined_header_active_u0(
+    header_path: Path,
+    coefficients: np.ndarray,
+) -> bool:
+    """Refresh an existing combined header and report whether it was present."""
+    header_path = Path(header_path)
+    if not header_path.is_file():
+        return False
+    updated = replace_combined_header_active_u0(
+        header_path.read_text(encoding="utf-8"),
+        coefficients,
+    )
+    write_text(header_path, updated)
+    return True
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--step", type=float, default=0.01)
@@ -539,6 +590,16 @@ def main() -> None:
     )
     output_dir = resolve_output_dir(args.output_dir)
     save_leso_result(result, output_dir)
+    combined_header = output_dir / "coef.h"
+    if combined_header.is_file():
+        lqr_result = compute_gain_schedule(step=args.step)
+        refresh_combined_header_active_u0(
+            combined_header,
+            lqr_result.input_coefficients[4, :, 0],
+        )
+        print(f"Refreshed active F_L U0 in: {combined_header}")
+    else:
+        print(f"Combined header not present; skipped U0 refresh: {combined_header}")
     print(render_leso_summary(result))
 
 
@@ -548,6 +609,8 @@ __all__ = [
     "compute_leso_schedule",
     "main",
     "render_leso_summary",
+    "refresh_combined_header_active_u0",
+    "replace_combined_header_active_u0",
     "save_leso_result",
     "step_scheduled_leso",
 ]

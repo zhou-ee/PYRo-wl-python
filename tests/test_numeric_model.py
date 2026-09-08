@@ -15,6 +15,20 @@ from wheel_leg_lqr.numeric_model import (
 )
 
 
+def test_gas_spring_force_fit_matches_firmware():
+    coefficients = np.asarray(config.GAS_SPRING_FORCE_POLY_COEF)
+    for length, normalized_length in ((0.18, -1.0), (0.28, 0.0), (0.38, 1.0)):
+        expected = np.polynomial.polynomial.polyval(normalized_length, coefficients)
+        assert config.compute_gas_spring_force(length) == pytest.approx(expected)
+
+    assert config.compute_gas_spring_force(0.10) == pytest.approx(
+        config.compute_gas_spring_force(0.18)
+    )
+    assert config.compute_gas_spring_force(0.50) == pytest.approx(
+        config.compute_gas_spring_force(0.38)
+    )
+
+
 def test_lbar_is_the_controlled_mean_actual_leg_length():
     geometry = make_trim_geometry(config.TRIM_L_BAR, config.TRIM_L_BAR)
     assert geometry.q[4] == pytest.approx(config.TRIM_L_BAR)
