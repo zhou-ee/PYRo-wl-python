@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from wheel_leg_lqr.numeric_config import N_X, SAMPLE_TIME
+from wheel_leg_lqr.numeric_config import N_U, N_X, SAMPLE_TIME
 from wheel_leg_lqr.scheduling.leg_length_schedule import (
     compute_gain_schedule,
     render_active_fl_u0_block,
@@ -28,9 +28,19 @@ def coarse_schedule():
 
 def test_schedule_meets_float32_holdout_and_observer_budgets(coarse_schedule):
     result = coarse_schedule
-    assert result.state_pole == pytest.approx(0.80)
-    assert result.disturbance_pole == pytest.approx(0.992)
-    assert result.unmatched_state_pole == pytest.approx(0.792)
+    np.testing.assert_array_equal(
+        result.state_bandwidths_hz,
+        np.asarray([80.0, 80.0, 80.0, 80.0, 25.0, 25.0]),
+    )
+    np.testing.assert_array_equal(
+        result.disturbance_bandwidths_hz,
+        np.asarray([2.4, 2.4, 2.4, 2.4, 1.2, 1.2]),
+    )
+    assert result.state_poles[0] == pytest.approx(0.604922563)
+    assert result.state_poles[4] == pytest.approx(0.854635999)
+    assert result.disturbance_poles[0] == pytest.approx(0.985033484)
+    assert result.disturbance_poles[4] == pytest.approx(0.992488531)
+    assert result.unmatched_state_pole == pytest.approx(0.854635999)
     assert result.compensation_cutoff_hz == pytest.approx(15.0)
     assert result.fl_compensation_gain == pytest.approx(0.30)
     assert result.g_schedule.total_degree == 4
@@ -45,6 +55,7 @@ def test_schedule_meets_float32_holdout_and_observer_budgets(coarse_schedule):
     assert result.g_metrics.float32_holdout_max_relative_error < 1.0e-3
     assert result.h_metrics.float32_holdout_max_relative_error < 1.0e-3
     assert result.ld_metrics.float32_holdout_max_relative_error < 5.0e-3
+    assert result.lx_metrics.float32_holdout_max_relative_error < 1.0e-2
     assert result.observer_metrics.float32_holdout_max_radius < 0.995
     assert result.observer_metrics.minimum_float32_margin > 0.005
     assert result.downstream_metrics.float32_train_max_radius < 0.9995
@@ -87,6 +98,41 @@ def test_schedule_preserves_fixed_structure_and_exchange_off_grid(
     )
 
 
+def test_fused_heterogeneous_state_correction_matches_dense_lx(
+    coarse_schedule,
+):
+    result = coarse_schedule
+    state_matrix, input_matrix, state_gain, disturbance_gain = result.matrices(
+        0.217, 0.361
+    )
+    rng = np.random.default_rng(20260909)
+    equilibrium = rng.normal(scale=0.1, size=N_X)
+    estimate = rng.normal(scale=0.1, size=N_X)
+    residual = rng.normal(scale=0.01, size=N_X)
+    applied_delta = rng.normal(scale=0.2, size=N_U)
+    disturbance = rng.normal(scale=0.2, size=N_U)
+    disturbance_residual = disturbance_gain @ residual
+
+    dense = (
+        equilibrium
+        + state_matrix @ (estimate - equilibrium)
+        + input_matrix @ (applied_delta + disturbance)
+        + state_gain @ residual
+    )
+    fused = (
+        equilibrium
+        + state_matrix @ (estimate - equilibrium + residual)
+        - result.unmatched_state_pole * residual
+        + input_matrix
+        @ (
+            applied_delta
+            + disturbance
+            - result.matched_correction_scales * disturbance_residual
+        )
+    )
+    np.testing.assert_allclose(fused, dense, atol=2.0e-13, rtol=2.0e-13)
+
+
 def test_generated_firmware_block_and_artifacts_are_deterministic(
     coarse_schedule, tmp_path: Path
 ):
@@ -99,9 +145,15 @@ def test_generated_firmware_block_and_artifacts_are_deterministic(
     assert "LESO_EVEN_TERM_COUNT = 9" in coefficients
     assert "LESO_ODD_TERM_COUNT = 6" in coefficients
     assert "LESO_POD_RANK = 3" in coefficients
-    assert "LESO_STATE_POLE = 8.000000119e-01f" in coefficients
-    assert "LESO_DISTURBANCE_POLE = 9.919999838e-01f" in coefficients
-    assert "LESO_UNMATCHED_POLE = 7.919999957e-01f" in coefficients
+    assert "LESO_STATE_BANDWIDTH_HZ[INPUT_DIM]" in coefficients
+    assert "LESO_DISTURBANCE_BANDWIDTH_HZ[INPUT_DIM]" in coefficients
+    assert "LESO_STATE_POLE[INPUT_DIM]" in coefficients
+    assert "LESO_DISTURBANCE_POLE[INPUT_DIM]" in coefficients
+    assert "LESO_MATCHED_ALPHA[INPUT_DIM]" in coefficients
+    assert "LESO_DISTURBANCE_COUPLING[INPUT_DIM]" in coefficients
+    assert "LESO_MATCHED_CORRECTION_SCALE[INPUT_DIM]" in coefficients
+    assert "LESO_UNMATCHED_STATE_BANDWIDTH_HZ = 2.500000000e+01f" in coefficients
+    assert "LESO_UNMATCHED_POLE = 8.546360135e-01f" in coefficients
     assert "LESO_COMPENSATION_FILTER_ALPHA" in coefficients
     assert "LESO_COMPENSATION_GAIN[INPUT_DIM]" in coefficients
     assert coefficients.count("3.000000119e-01f") == 2
@@ -123,7 +175,7 @@ def test_generated_firmware_block_and_artifacts_are_deterministic(
     assert "_ctx.data." not in coefficients
     assert "BEGIN GENERATED LESO POD-CHEBYSHEV RUNTIME FIT" in runtime
     assert "static constexpr" not in runtime
-    assert runtime.count("for (uint32_t") == 20
+    assert runtime.count("for (uint32_t") == 19
     assert "static float" not in runtime
     assert "MatrixView" not in runtime
     assert "LESO_TERMS[term]" in runtime
@@ -131,7 +183,7 @@ def test_generated_firmware_block_and_artifacts_are_deterministic(
     assert "for (uint32_t mode = 0; mode < LESO_POD_RANK; ++mode)" in runtime
     assert "_ctx.data.G(row, column)" in runtime
     assert "_ctx.data.H(row, column)" in runtime
-    assert "_ctx.data.L_x(row, column)" in runtime
+    assert "_ctx.data.L_x" not in runtime
     assert "_ctx.data.L_d(row, column)" in runtime
 
     save_result(coarse_schedule, tmp_path)
@@ -146,6 +198,9 @@ def test_generated_firmware_block_and_artifacts_are_deterministic(
     assert (tmp_path / "leso_schedule.json").is_file()
     with np.load(tmp_path / "leso_schedule.npz") as archive:
         assert float(archive["fl_compensation_gain"]) == pytest.approx(0.30)
+        assert float(archive["unmatched_state_bandwidth_hz"]) == pytest.approx(
+            25.0
+        )
         np.testing.assert_array_equal(
             archive["compensation_gains"],
             np.asarray(
@@ -158,6 +213,15 @@ def test_generated_firmware_block_and_artifacts_are_deterministic(
 def test_schedule_rejects_invalid_fl_compensation_gain(gain):
     with pytest.raises(ValueError, match="fl_compensation_gain"):
         compute_leso_schedule(step=0.04, fl_compensation_gain=gain)
+
+
+@pytest.mark.parametrize("bandwidth", [0.0, 500.0, np.nan])
+def test_schedule_rejects_invalid_observer_bandwidth(bandwidth):
+    with pytest.raises(ValueError, match="observer bandwidths"):
+        compute_leso_schedule(
+            step=0.04,
+            torque_state_bandwidth_hz=bandwidth,
+        )
 
 
 def test_firmware_renderer_rejects_nonuniform_ranks(coarse_schedule):

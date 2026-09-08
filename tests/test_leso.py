@@ -1,8 +1,14 @@
 import numpy as np
 
 from wheel_leg_lqr.control.leso import (
+    DEFAULT_FL_DISTURBANCE_BANDWIDTH_HZ,
+    DEFAULT_FL_STATE_BANDWIDTH_HZ,
+    DEFAULT_TORQUE_DISTURBANCE_BANDWIDTH_HZ,
+    DEFAULT_TORQUE_STATE_BANDWIDTH_HZ,
+    DEFAULT_UNMATCHED_STATE_POLE,
     build_augmented_model,
     design_leso_correction,
+    discrete_pole_from_bandwidth,
     observer_error_matrix,
     observer_error_spectral_radius,
     step_leso_split,
@@ -28,10 +34,12 @@ def test_analytic_leso_has_the_requested_augmented_poles():
         )
     )
     expected = np.sort_complex(
-        np.asarray(
-            [correction.unmatched_state_pole] * (N_X - N_U)
-            + [correction.state_pole] * N_U
-            + [correction.disturbance_pole] * N_U
+        np.concatenate(
+            [
+                np.full(N_X - N_U, correction.unmatched_state_pole),
+                correction.state_poles,
+                correction.disturbance_poles,
+            ]
         )
     )
     np.testing.assert_allclose(poles, expected, atol=2.0e-10, rtol=0.0)
@@ -41,6 +49,39 @@ def test_analytic_leso_has_the_requested_augmented_poles():
         correction.state_gain,
         correction.disturbance_gain,
     ) < 1.0
+    np.testing.assert_allclose(
+        correction.state_poles[:4],
+        discrete_pole_from_bandwidth(DEFAULT_TORQUE_STATE_BANDWIDTH_HZ),
+    )
+    np.testing.assert_allclose(
+        correction.state_poles[4:],
+        discrete_pole_from_bandwidth(DEFAULT_FL_STATE_BANDWIDTH_HZ),
+    )
+    np.testing.assert_allclose(
+        correction.disturbance_poles[:4],
+        discrete_pole_from_bandwidth(
+            DEFAULT_TORQUE_DISTURBANCE_BANDWIDTH_HZ
+        ),
+    )
+    np.testing.assert_allclose(
+        correction.disturbance_poles[4:],
+        discrete_pole_from_bandwidth(DEFAULT_FL_DISTURBANCE_BANDWIDTH_HZ),
+    )
+    assert correction.unmatched_state_pole == DEFAULT_UNMATCHED_STATE_POLE
+
+    fused_state_gain = (
+        node.Ad
+        - correction.unmatched_state_pole * np.eye(N_X)
+        - node.Bd
+        @ np.diag(correction.matched_correction_scales)
+        @ correction.disturbance_gain
+    )
+    np.testing.assert_allclose(
+        correction.state_gain,
+        fused_state_gain,
+        atol=2.0e-12,
+        rtol=2.0e-12,
+    )
 
 
 def test_split_update_matches_the_augmented_observer_equation():

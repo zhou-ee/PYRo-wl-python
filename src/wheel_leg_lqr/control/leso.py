@@ -20,11 +20,52 @@ import numpy as np
 from ..core import config
 
 
-# Conservative deployment tuning for the 1 kHz firmware loop.  The slower
-# state pole rejects encoder/IMU high-frequency noise, while the disturbance
-# pole keeps matched-disturbance compensation focused on low-frequency loads.
-DEFAULT_STATE_POLE = 0.80
-DEFAULT_DISTURBANCE_POLE = 0.992
+DEFAULT_TORQUE_STATE_BANDWIDTH_HZ = 80.0
+DEFAULT_TORQUE_DISTURBANCE_BANDWIDTH_HZ = 2.4
+DEFAULT_FL_STATE_BANDWIDTH_HZ = 25.0
+DEFAULT_FL_DISTURBANCE_BANDWIDTH_HZ = 1.2
+DEFAULT_UNMATCHED_STATE_BANDWIDTH_HZ = 25.0
+
+
+def discrete_pole_from_bandwidth(
+    bandwidth_hz: float,
+    sample_time: float = config.SAMPLE_TIME,
+) -> float:
+    """Map a continuous first-order bandwidth to a discrete pole."""
+
+    if not np.isfinite(bandwidth_hz) or bandwidth_hz <= 0.0:
+        raise ValueError("bandwidth_hz must be positive and finite")
+    if not np.isfinite(sample_time) or sample_time <= 0.0:
+        raise ValueError("sample_time must be positive and finite")
+    return float(np.exp(-2.0 * np.pi * bandwidth_hz * sample_time))
+
+
+_DEFAULT_TORQUE_STATE_POLE = discrete_pole_from_bandwidth(
+    DEFAULT_TORQUE_STATE_BANDWIDTH_HZ
+)
+_DEFAULT_FL_STATE_POLE = discrete_pole_from_bandwidth(
+    DEFAULT_FL_STATE_BANDWIDTH_HZ
+)
+_DEFAULT_TORQUE_DISTURBANCE_POLE = discrete_pole_from_bandwidth(
+    DEFAULT_TORQUE_DISTURBANCE_BANDWIDTH_HZ
+)
+_DEFAULT_FL_DISTURBANCE_POLE = discrete_pole_from_bandwidth(
+    DEFAULT_FL_DISTURBANCE_BANDWIDTH_HZ
+)
+DEFAULT_STATE_POLES = np.asarray(
+    [_DEFAULT_TORQUE_STATE_POLE] * 4 + [_DEFAULT_FL_STATE_POLE] * 2,
+    dtype=float,
+)
+DEFAULT_DISTURBANCE_POLES = np.asarray(
+    [_DEFAULT_TORQUE_DISTURBANCE_POLE] * 4
+    + [_DEFAULT_FL_DISTURBANCE_POLE] * 2,
+    dtype=float,
+)
+DEFAULT_UNMATCHED_STATE_POLE = discrete_pole_from_bandwidth(
+    DEFAULT_UNMATCHED_STATE_BANDWIDTH_HZ
+)
+DEFAULT_STATE_POLES.setflags(write=False)
+DEFAULT_DISTURBANCE_POLES.setflags(write=False)
 
 
 @dataclass(frozen=True)
@@ -33,10 +74,24 @@ class LesoCorrection:
 
     state_gain: np.ndarray
     disturbance_gain: np.ndarray
-    state_pole: float
-    disturbance_pole: float
+    state_poles: np.ndarray
+    disturbance_poles: np.ndarray
     unmatched_state_pole: float
-    disturbance_coupling: float
+    matched_state_coefficients: np.ndarray
+    disturbance_couplings: np.ndarray
+    matched_correction_scales: np.ndarray
+
+    def __post_init__(self) -> None:
+        for name in (
+            "state_poles",
+            "disturbance_poles",
+            "matched_state_coefficients",
+            "disturbance_couplings",
+            "matched_correction_scales",
+        ):
+            values = np.asarray(getattr(self, name), dtype=float).copy()
+            values.setflags(write=False)
+            object.__setattr__(self, name, values)
 
 
 def _validate_discrete_model(
@@ -98,54 +153,94 @@ def design_leso_correction(
     state_matrix: np.ndarray,
     input_matrix: np.ndarray,
     *,
-    state_pole: float = DEFAULT_STATE_POLE,
-    disturbance_pole: float = DEFAULT_DISTURBANCE_POLE,
+    state_poles: np.ndarray | float | None = None,
+    disturbance_poles: np.ndarray | float | None = None,
+    unmatched_state_pole: float = DEFAULT_UNMATCHED_STATE_POLE,
     pinv_rcond: float = 1.0e-12,
 ) -> LesoCorrection:
     """Design a deterministic, mirror-equivariant LESO correction.
 
     Let ``H+`` be the Moore-Penrose inverse of the full-column-rank ``H``.
-    With
+    For each input channel ``i``, choose
 
-    ``alpha = state_pole + disturbance_pole - 1`` and
-    ``gamma = (1-state_pole) (1-disturbance_pole)``, choose
+    ``alpha_i = state_pole_i + disturbance_pole_i - 1`` and
+    ``gamma_i = (1-state_pole_i) (1-disturbance_pole_i)``.
 
-    ``L_x = G - alpha I`` and ``L_d = gamma H+``.
+    Let ``Alpha=diag(alpha_i)``, ``Gamma=diag(gamma_i)`` and let
+    ``p_u`` be the pole assigned to the state-error complement of ``range(H)``.
+    The correction is
 
-    Every matched disturbance channel then has the requested two observer
-    poles.  The remaining ``N_X-N_U`` state-error directions have pole
-    ``alpha``.  For the deployment defaults these poles are 0.8, 0.992 and
-    0.792 respectively.  The construction commutes with orthogonal signed
-    left/right permutations, unlike a non-unique generic MIMO pole placement.
+    ``L_x = G - p_u I - H (Alpha-p_u I) H+`` and
+    ``L_d = Gamma H+``.
+
+    Every matched disturbance channel then has its requested state and
+    disturbance poles.  The remaining ``N_X-N_U`` state-error directions have
+    pole ``p_u``.  Equal parameters for each left/right pair preserve exchange
+    symmetry.
     """
 
     state_matrix, input_matrix = _validate_discrete_model(
         state_matrix, input_matrix
     )
-    if not (0.0 < state_pole < 1.0):
-        raise ValueError("state_pole must lie strictly inside (0, 1)")
-    if not (0.0 < disturbance_pole < 1.0):
-        raise ValueError("disturbance_pole must lie strictly inside (0, 1)")
+    def channel_poles(
+        values: np.ndarray | float | None,
+        defaults: np.ndarray,
+        name: str,
+    ) -> np.ndarray:
+        if values is None:
+            result = defaults.copy()
+        else:
+            result = np.asarray(values, dtype=float)
+            if result.ndim == 0:
+                result = np.full(config.N_U, float(result), dtype=float)
+            else:
+                result = result.reshape(-1).copy()
+        if result.shape != (config.N_U,):
+            raise ValueError(f"{name} must contain {config.N_U} values")
+        if not np.all(np.isfinite(result)) or np.any(result <= 0.0) or np.any(
+            result >= 1.0
+        ):
+            raise ValueError(f"{name} must lie strictly inside (0, 1)")
+        return result
+
+    state_poles = channel_poles(
+        state_poles, DEFAULT_STATE_POLES, "state_poles"
+    )
+    disturbance_poles = channel_poles(
+        disturbance_poles,
+        DEFAULT_DISTURBANCE_POLES,
+        "disturbance_poles",
+    )
+    if not np.isfinite(unmatched_state_pole) or not (
+        0.0 < unmatched_state_pole < 1.0
+    ):
+        raise ValueError("unmatched_state_pole must lie strictly inside (0, 1)")
     if pinv_rcond <= 0.0:
         raise ValueError("pinv_rcond must be positive")
     if np.linalg.matrix_rank(input_matrix) != config.N_U:
         raise ValueError("input_matrix must have full disturbance-channel rank")
 
-    unmatched_pole = state_pole + disturbance_pole - 1.0
-    if not (-1.0 < unmatched_pole < 1.0):
-        raise ValueError("the implied unmatched state-error pole is unstable")
-    coupling = (1.0 - state_pole) * (1.0 - disturbance_pole)
+    matched_coefficients = state_poles + disturbance_poles - 1.0
+    couplings = (1.0 - state_poles) * (1.0 - disturbance_poles)
     input_inverse = np.linalg.pinv(input_matrix, rcond=pinv_rcond)
-    state_gain = state_matrix - unmatched_pole * np.eye(config.N_X)
-    disturbance_gain = coupling * input_inverse
+    matched_offset = matched_coefficients - unmatched_state_pole
+    state_error_matrix = (
+        unmatched_state_pole * np.eye(config.N_X)
+        + input_matrix @ np.diag(matched_offset) @ input_inverse
+    )
+    state_gain = state_matrix - state_error_matrix
+    disturbance_gain = np.diag(couplings) @ input_inverse
+    correction_scales = matched_offset / couplings
 
     return LesoCorrection(
         state_gain=np.asarray(state_gain, dtype=float),
         disturbance_gain=np.asarray(disturbance_gain, dtype=float),
-        state_pole=float(state_pole),
-        disturbance_pole=float(disturbance_pole),
-        unmatched_state_pole=float(unmatched_pole),
-        disturbance_coupling=float(coupling),
+        state_poles=state_poles,
+        disturbance_poles=disturbance_poles,
+        unmatched_state_pole=float(unmatched_state_pole),
+        matched_state_coefficients=matched_coefficients,
+        disturbance_couplings=couplings,
+        matched_correction_scales=correction_scales,
     )
 
 
@@ -235,11 +330,18 @@ def step_leso_split(
 
 
 __all__ = [
-    "DEFAULT_DISTURBANCE_POLE",
-    "DEFAULT_STATE_POLE",
+    "DEFAULT_DISTURBANCE_POLES",
+    "DEFAULT_FL_DISTURBANCE_BANDWIDTH_HZ",
+    "DEFAULT_FL_STATE_BANDWIDTH_HZ",
+    "DEFAULT_STATE_POLES",
+    "DEFAULT_TORQUE_DISTURBANCE_BANDWIDTH_HZ",
+    "DEFAULT_TORQUE_STATE_BANDWIDTH_HZ",
+    "DEFAULT_UNMATCHED_STATE_BANDWIDTH_HZ",
+    "DEFAULT_UNMATCHED_STATE_POLE",
     "LesoCorrection",
     "build_augmented_model",
     "design_leso_correction",
+    "discrete_pole_from_bandwidth",
     "observer_error_matrix",
     "observer_error_spectral_radius",
     "step_leso_split",

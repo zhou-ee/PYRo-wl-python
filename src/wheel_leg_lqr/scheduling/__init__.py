@@ -2,6 +2,11 @@
 
 from .leso_schedule import (
     DEFAULT_FL_COMPENSATION_GAIN,
+    DEFAULT_FL_DISTURBANCE_BANDWIDTH_HZ,
+    DEFAULT_FL_STATE_BANDWIDTH_HZ,
+    DEFAULT_TORQUE_DISTURBANCE_BANDWIDTH_HZ,
+    DEFAULT_TORQUE_STATE_BANDWIDTH_HZ,
+    DEFAULT_UNMATCHED_STATE_BANDWIDTH_HZ,
     LesoScheduleFit,
     compute_leso_schedule,
     render_combined_coef_header,
@@ -26,6 +31,11 @@ __all__ = [
     "GainNode",
     "GainScheduleFit",
     "DEFAULT_FL_COMPENSATION_GAIN",
+    "DEFAULT_FL_DISTURBANCE_BANDWIDTH_HZ",
+    "DEFAULT_FL_STATE_BANDWIDTH_HZ",
+    "DEFAULT_TORQUE_DISTURBANCE_BANDWIDTH_HZ",
+    "DEFAULT_TORQUE_STATE_BANDWIDTH_HZ",
+    "DEFAULT_UNMATCHED_STATE_BANDWIDTH_HZ",
     "LesoScheduleFit",
     "SymmetricPodChebyshevSchedule",
     "compute_gain_node",
