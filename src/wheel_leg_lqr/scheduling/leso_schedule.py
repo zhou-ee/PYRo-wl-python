@@ -19,11 +19,14 @@ import numpy as np
 from .. import resolve_output_dir
 from ..artifacts.io import write_text
 from ..control.leso import (
+    DEFAULT_DISTURBANCE_LEAK_BANDWIDTH_HZ,
     DEFAULT_FL_DISTURBANCE_BANDWIDTH_HZ,
     DEFAULT_FL_STATE_BANDWIDTH_HZ,
+    DEFAULT_HIP_STATE_BANDWIDTH_HZ,
     DEFAULT_TORQUE_DISTURBANCE_BANDWIDTH_HZ,
     DEFAULT_TORQUE_STATE_BANDWIDTH_HZ,
     DEFAULT_UNMATCHED_STATE_BANDWIDTH_HZ,
+    DEFAULT_WHEEL_STATE_BANDWIDTH_HZ,
     design_leso_correction,
     discrete_pole_from_bandwidth,
     observer_error_spectral_radius,
@@ -56,6 +59,7 @@ DEFAULT_COMPENSATION_CUTOFF_HZ = 15.0
 COMPENSATION_FILTER_ORDER = 3
 DEFAULT_FL_COMMON_COMPENSATION_GAIN = 0.10
 DEFAULT_FL_DIFFERENTIAL_COMPENSATION_GAIN = 0.30
+DEFAULT_DISTURBANCE_LIMIT_RATIO = 0.10
 
 G_SCHEDULED_COLUMN_OFFSET = 4
 G_SCHEDULED_COLUMN_COUNT = config.N_X - G_SCHEDULED_COLUMN_OFFSET
@@ -74,6 +78,7 @@ _DEFAULT_LD_ERROR_BUDGET = 5.0e-3
 _DEFAULT_LX_ERROR_BUDGET = 1.0e-2
 _DEFAULT_OBSERVER_RADIUS_LIMIT = 0.995
 _DEFAULT_CLOSED_LOOP_RADIUS_LIMIT = 0.9995
+_DEFAULT_MINIMUM_CONSTANT_DISTURBANCE_TRACKING = 0.80
 
 
 def _signed_permutation(indices: list[int], signs: list[int]) -> np.ndarray:
@@ -152,6 +157,11 @@ class LesoScheduleFit:
     disturbance_bandwidths_hz: np.ndarray
     state_poles: np.ndarray
     disturbance_poles: np.ndarray
+    disturbance_leak_bandwidth_hz: float
+    disturbance_retention_pole: float
+    disturbance_limits: np.ndarray
+    disturbance_maximum_increments: np.ndarray
+    constant_disturbance_tracking_fraction: np.ndarray
     unmatched_state_bandwidth_hz: float
     unmatched_state_pole: float
     matched_state_coefficients: np.ndarray
@@ -316,6 +326,7 @@ def _compute_raw_matrices(
     *,
     state_poles: np.ndarray,
     disturbance_poles: np.ndarray,
+    disturbance_retention_pole: float,
     unmatched_state_pole: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     state_matrices = []
@@ -337,6 +348,7 @@ def _compute_raw_matrices(
             input_matrix,
             state_poles=state_poles,
             disturbance_poles=disturbance_poles,
+            disturbance_retention_pole=disturbance_retention_pole,
             unmatched_state_pole=unmatched_state_pole,
         )
         state_matrices.append(state_matrix)
@@ -488,6 +500,7 @@ def _observer_radii(
     input_matrices: np.ndarray,
     state_gains: np.ndarray,
     disturbance_gains: np.ndarray,
+    disturbance_retention_pole: float,
 ) -> np.ndarray:
     radii = []
     for state_matrix, input_matrix, state_gain, disturbance_gain in zip(
@@ -499,6 +512,7 @@ def _observer_radii(
                 input_matrix,
                 state_gain,
                 disturbance_gain,
+                disturbance_retention_pole,
             )
         )
     return np.asarray(radii)
@@ -597,10 +611,11 @@ def _downstream_closed_loop_radii(
     fitted_input_matrices: np.ndarray,
     fitted_state_gains: np.ndarray,
     fitted_disturbance_gains: np.ndarray,
+    disturbance_retention_pole: float,
     compensation_filter_stage_alpha: float,
     compensation_matrix: np.ndarray,
 ) -> np.ndarray:
-    """Return radii of the plant, LESO and filtered disturbance compensation."""
+    """Return radii for measured-state LQR plus LESO compensation."""
 
     radii = []
     disturbance_identity = np.eye(config.N_U)
@@ -620,6 +635,9 @@ def _downstream_closed_loop_radii(
     observer_disturbance_matrix = (
         disturbance_identity - compensation_matrix @ filter_output_input
     )
+    retained_disturbance_matrix = (
+        disturbance_retention_pole * disturbance_identity
+    )
     zero_filter_state = np.zeros((filter_state_dim, config.N_X))
     zero_filter_input = np.zeros((config.N_U, filter_state_dim))
     for raw_g, raw_h, gain, fitted_g, fitted_h, fitted_lx, fitted_ld in zip(
@@ -636,21 +654,21 @@ def _downstream_closed_loop_radii(
         closed_loop = np.block(
             [
                 [
-                    raw_g,
-                    -raw_h @ gain,
+                    raw_g - raw_h @ gain,
+                    np.zeros_like(raw_g),
                     -raw_h_compensation @ filter_output_input,
                     -raw_h_compensation @ filter_output_matrix,
                 ],
                 [
-                    fitted_lx,
-                    fitted_g - fitted_h @ gain - fitted_lx,
+                    fitted_lx - fitted_h @ gain,
+                    fitted_g - fitted_lx,
                     fitted_h @ observer_disturbance_matrix,
                     -fitted_h_compensation @ filter_output_matrix,
                 ],
                 [
                     fitted_ld,
                     -fitted_ld,
-                    disturbance_identity,
+                    retained_disturbance_matrix,
                     zero_filter_input,
                 ],
                 [
@@ -756,7 +774,8 @@ def compute_leso_schedule(
     h_odd_rank: int = DEFAULT_H_ODD_RANK,
     ld_even_rank: int = DEFAULT_LD_EVEN_RANK,
     ld_odd_rank: int = DEFAULT_LD_ODD_RANK,
-    torque_state_bandwidth_hz: float = DEFAULT_TORQUE_STATE_BANDWIDTH_HZ,
+    wheel_state_bandwidth_hz: float = DEFAULT_WHEEL_STATE_BANDWIDTH_HZ,
+    hip_state_bandwidth_hz: float = DEFAULT_HIP_STATE_BANDWIDTH_HZ,
     torque_disturbance_bandwidth_hz: float = (
         DEFAULT_TORQUE_DISTURBANCE_BANDWIDTH_HZ
     ),
@@ -767,6 +786,10 @@ def compute_leso_schedule(
     unmatched_state_bandwidth_hz: float = (
         DEFAULT_UNMATCHED_STATE_BANDWIDTH_HZ
     ),
+    disturbance_leak_bandwidth_hz: float = (
+        DEFAULT_DISTURBANCE_LEAK_BANDWIDTH_HZ
+    ),
+    disturbance_limit_ratio: float = DEFAULT_DISTURBANCE_LIMIT_RATIO,
     holdout_random_count: int = 64,
     holdout_seed: int = 20260902,
     g_error_budget: float = _DEFAULT_G_ERROR_BUDGET,
@@ -775,6 +798,9 @@ def compute_leso_schedule(
     lx_error_budget: float = _DEFAULT_LX_ERROR_BUDGET,
     observer_radius_limit: float = _DEFAULT_OBSERVER_RADIUS_LIMIT,
     closed_loop_radius_limit: float = _DEFAULT_CLOSED_LOOP_RADIUS_LIMIT,
+    minimum_constant_disturbance_tracking: float = (
+        _DEFAULT_MINIMUM_CONSTANT_DISTURBANCE_TRACKING
+    ),
     compensation_cutoff_hz: float = DEFAULT_COMPENSATION_CUTOFF_HZ,
     fl_common_compensation_gain: float = DEFAULT_FL_COMMON_COMPENSATION_GAIN,
     fl_differential_compensation_gain: float = (
@@ -797,11 +823,13 @@ def compute_leso_schedule(
     )
     bandwidths = np.asarray(
         [
-            torque_state_bandwidth_hz,
+            wheel_state_bandwidth_hz,
+            hip_state_bandwidth_hz,
             torque_disturbance_bandwidth_hz,
             fl_state_bandwidth_hz,
             fl_disturbance_bandwidth_hz,
             unmatched_state_bandwidth_hz,
+            disturbance_leak_bandwidth_hz,
         ],
         dtype=float,
     )
@@ -809,8 +837,16 @@ def compute_leso_schedule(
         bandwidths >= nyquist_hz
     ):
         raise ValueError("observer bandwidths must lie between zero and Nyquist")
+    if (
+        not np.isfinite(disturbance_limit_ratio)
+        or disturbance_limit_ratio <= 0.0
+        or disturbance_limit_ratio > 1.0
+    ):
+        raise ValueError("disturbance_limit_ratio must lie in (0, 1]")
     state_bandwidths = np.asarray(
-        [torque_state_bandwidth_hz] * 4 + [fl_state_bandwidth_hz] * 2,
+        [wheel_state_bandwidth_hz] * 2
+        + [hip_state_bandwidth_hz] * 2
+        + [fl_state_bandwidth_hz] * 2,
         dtype=float,
     )
     disturbance_bandwidths = np.asarray(
@@ -830,6 +866,15 @@ def compute_leso_schedule(
     unmatched_pole = discrete_pole_from_bandwidth(
         unmatched_state_bandwidth_hz
     )
+    disturbance_retention_pole = discrete_pole_from_bandwidth(
+        disturbance_leak_bandwidth_hz
+    )
+    disturbance_limits = (
+        disturbance_limit_ratio * config.INPUT_UPPER_LIMITS
+    )
+    disturbance_maximum_increments = (
+        (1.0 - disturbance_poles) * disturbance_limits
+    )
 
     grid = make_leg_length_grid(step=step)
     train_points = np.asarray(
@@ -842,12 +887,14 @@ def compute_leso_schedule(
         train_points,
         state_poles=state_poles,
         disturbance_poles=disturbance_poles,
+        disturbance_retention_pole=disturbance_retention_pole,
         unmatched_state_pole=unmatched_pole,
     )
     holdout_raw = _compute_raw_matrices(
         holdout_points,
         state_poles=state_poles,
         disturbance_poles=disturbance_poles,
+        disturbance_retention_pole=disturbance_retention_pole,
         unmatched_state_pole=unmatched_pole,
     )
     transforms = (
@@ -986,8 +1033,32 @@ def compute_leso_schedule(
         train_h[0],
         state_poles=state_poles,
         disturbance_poles=disturbance_poles,
+        disturbance_retention_pole=disturbance_retention_pole,
         unmatched_state_pole=unmatched_pole,
     )
+    dc_innovation_gain = correction.disturbance_couplings / (
+        1.0 - disturbance_retention_pole
+    )
+    constant_disturbance_tracking_fraction = dc_innovation_gain / (
+        1.0 - correction.matched_state_coefficients
+        + dc_innovation_gain
+    )
+    if (
+        not np.isfinite(minimum_constant_disturbance_tracking)
+        or minimum_constant_disturbance_tracking <= 0.0
+        or minimum_constant_disturbance_tracking > 1.0
+    ):
+        raise ValueError(
+            "minimum_constant_disturbance_tracking must lie in (0, 1]"
+        )
+    if np.min(constant_disturbance_tracking_fraction) < (
+        minimum_constant_disturbance_tracking
+    ):
+        raise ValueError(
+            "disturbance leakage leaves only "
+            f"{np.min(constant_disturbance_tracking_fraction):.6f} "
+            "constant-disturbance tracking"
+        )
     train_lx_fit = _state_gain_stack(
         identity + train_g_fit,
         train_fitted[1],
@@ -1034,12 +1105,24 @@ def compute_leso_schedule(
     )
     observer_metrics = ObserverMetrics(
         raw_train_max_radius=float(
-            np.max(_observer_radii(train_g, train_h, train_lx, train_ld))
+            np.max(
+                _observer_radii(
+                    train_g,
+                    train_h,
+                    train_lx,
+                    train_ld,
+                    disturbance_retention_pole,
+                )
+            )
         ),
         raw_holdout_max_radius=float(
             np.max(
                 _observer_radii(
-                    holdout_g, holdout_h, holdout_lx, holdout_ld
+                    holdout_g,
+                    holdout_h,
+                    holdout_lx,
+                    holdout_ld,
+                    disturbance_retention_pole,
                 )
             )
         ),
@@ -1050,6 +1133,7 @@ def compute_leso_schedule(
                     train_fitted[1],
                     train_lx_fit,
                     train_fitted[2],
+                    disturbance_retention_pole,
                 )
             )
         ),
@@ -1060,6 +1144,7 @@ def compute_leso_schedule(
                     holdout_fitted[1],
                     holdout_lx_fit,
                     holdout_fitted[2],
+                    disturbance_retention_pole,
                 )
             )
         ),
@@ -1070,6 +1155,7 @@ def compute_leso_schedule(
                     float_train_fitted[1],
                     float_train_lx_fit,
                     float_train_fitted[2],
+                    disturbance_retention_pole,
                 )
             )
         ),
@@ -1080,6 +1166,7 @@ def compute_leso_schedule(
                     float_holdout_fitted[1],
                     float_holdout_lx_fit,
                     float_holdout_fitted[2],
+                    disturbance_retention_pole,
                 )
             )
         ),
@@ -1115,6 +1202,7 @@ def compute_leso_schedule(
                     float_train_fitted[1],
                     float_train_lx_fit,
                     float_train_fitted[2],
+                    disturbance_retention_pole,
                     compensation_filter_stage_alpha,
                     compensation_matrix,
                 )
@@ -1130,6 +1218,7 @@ def compute_leso_schedule(
                     float_holdout_fitted[1],
                     float_holdout_lx_fit,
                     float_holdout_fitted[2],
+                    disturbance_retention_pole,
                     compensation_filter_stage_alpha,
                     compensation_matrix,
                 )
@@ -1189,6 +1278,15 @@ def compute_leso_schedule(
         disturbance_bandwidths_hz=disturbance_bandwidths,
         state_poles=correction.state_poles,
         disturbance_poles=correction.disturbance_poles,
+        disturbance_leak_bandwidth_hz=float(
+            disturbance_leak_bandwidth_hz
+        ),
+        disturbance_retention_pole=disturbance_retention_pole,
+        disturbance_limits=disturbance_limits,
+        disturbance_maximum_increments=disturbance_maximum_increments,
+        constant_disturbance_tracking_fraction=(
+            constant_disturbance_tracking_fraction
+        ),
         unmatched_state_bandwidth_hz=float(unmatched_state_bandwidth_hz),
         unmatched_state_pole=unmatched_pole,
         matched_state_coefficients=correction.matched_state_coefficients,
@@ -1320,7 +1418,8 @@ def _render_combined_firmware_block(result: LesoScheduleFit) -> str:
         "    // BEGIN GENERATED LESO POD-CHEBYSHEV FIT",
         "    // Generated from the current 14-state/6-input model; do not hand-edit.",
         "    // G-I, H and L_d use separate dense POD bases.",
-        "    // L_x action is fused as G*r - p_u*r - H*diag(C)*L_d*r.",
+        "    // L_x action is fused as G*r - p_u*r - H*diag(C)*q.",
+        "    // q is the slew/anti-windup limited L_d*r accepted by d_hat.",
         f"    constexpr uint32_t LESO_CHEBYSHEV_DEGREE = {degree};",
         f"    constexpr uint32_t LESO_EVEN_TERM_COUNT = {len(even_terms)};",
         f"    constexpr uint32_t LESO_ODD_TERM_COUNT = {len(odd_terms)};",
@@ -1328,6 +1427,15 @@ def _render_combined_firmware_block(result: LesoScheduleFit) -> str:
         f"    constexpr uint32_t LESO_G_COLUMN_COUNT = {G_SCHEDULED_COLUMN_COUNT};",
         f"    constexpr uint32_t LESO_POD_RANK = {pod_rank};",
         f"    constexpr float LESO_SAMPLE_TIME = {_firmware_float(config.SAMPLE_TIME)};",
+        f"    constexpr float LESO_DISTURBANCE_LEAK_BANDWIDTH_HZ = {_firmware_float(result.disturbance_leak_bandwidth_hz)};",
+        f"    constexpr float LESO_DISTURBANCE_RETENTION_POLE = {_firmware_float(result.disturbance_retention_pole)};",
+        *_firmware_vector_lines(
+            "LESO_DISTURBANCE_LIMIT[INPUT_DIM]", result.disturbance_limits
+        ),
+        *_firmware_vector_lines(
+            "LESO_DISTURBANCE_MAX_INCREMENT[INPUT_DIM]",
+            result.disturbance_maximum_increments,
+        ),
         f"    constexpr float LESO_UNMATCHED_STATE_BANDWIDTH_HZ = {_firmware_float(result.unmatched_state_bandwidth_hz)};",
         f"    constexpr float LESO_UNMATCHED_POLE = {_firmware_float(result.unmatched_state_pole)};",
         *_firmware_vector_lines(
@@ -1628,6 +1736,7 @@ def _runtime_counts(result: LesoScheduleFit) -> dict[str, int]:
     observer_update_multiplies = (
         config.N_U * config.N_X
         + config.N_U
+        + config.N_U
         + config.N_X
         + config.N_X * config.N_X
         + config.N_X * config.N_U
@@ -1640,9 +1749,13 @@ def _runtime_counts(result: LesoScheduleFit) -> dict[str, int]:
         + config.N_X
         + config.N_X * config.N_X
         + config.N_X * config.N_U
-        + config.N_U
+        + 2 * config.N_U
     )
-    storage_floats = sum(schedule.storage_float_count for schedule in schedules)
+    contract_floats = 9 + 10 * config.N_U
+    storage_floats = (
+        sum(schedule.storage_float_count for schedule in schedules)
+        + contract_floats
+    )
     dense_lookup_floats = len(result.l1_grid) * len(result.l2_grid) * (
         config.N_X * G_SCHEDULED_COLUMN_COUNT
         + config.N_X * config.N_U
@@ -1698,9 +1811,12 @@ def render_summary(result: LesoScheduleFit) -> str:
         f"- State-observer bandwidth Tw/Tp/Fl: `{result.state_bandwidths_hz[0]:.3f} / {result.state_bandwidths_hz[2]:.3f} / {result.state_bandwidths_hz[4]:.3f} Hz`",
         f"- Disturbance-observer bandwidth Tw/Tp/Fl: `{result.disturbance_bandwidths_hz[0]:.3f} / {result.disturbance_bandwidths_hz[2]:.3f} / {result.disturbance_bandwidths_hz[4]:.3f} Hz`",
         f"- State poles Tw/Tp/Fl: `{result.state_poles[0]:.9f} / {result.state_poles[2]:.9f} / {result.state_poles[4]:.9f}`; disturbance poles: `{result.disturbance_poles[0]:.9f} / {result.disturbance_poles[2]:.9f} / {result.disturbance_poles[4]:.9f}`",
+        f"- Disturbance leakage: `{result.disturbance_leak_bandwidth_hz:.3f} Hz` (retention pole `{result.disturbance_retention_pole:.9f}`)",
+        f"- Constant-disturbance tracking fraction Tw/Tp/Fl: `{result.constant_disturbance_tracking_fraction[0]:.6f} / {result.constant_disturbance_tracking_fraction[2]:.6f} / {result.constant_disturbance_tracking_fraction[4]:.6f}`",
+        f"- Per-update disturbance increment limits Tw/Tp/Fl: `{result.disturbance_maximum_increments[0]:.6f} / {result.disturbance_maximum_increments[2]:.6f} / {result.disturbance_maximum_increments[4]:.6f}` in input-equivalent units",
         f"- Unmatched-state pole: `{result.unmatched_state_pole:.9f}` (`{result.unmatched_state_bandwidth_hz:.3f} Hz`)",
         f"- Disturbance-compensation low-pass: third-order cascade, overall cutoff `{result.compensation_cutoff_hz:.3f} Hz` (stage alpha `{_compensation_filter_stage_alpha(result.compensation_cutoff_hz):.9f}`)",
-        f"- Compensation execution gains Tw/Tp: `1.0 / 1.0`; FL common/differential: `{result.fl_common_compensation_gain:.3f} / {result.fl_differential_compensation_gain:.3f}`; observer feedback still uses the full raw disturbance estimate.",
+        f"- Compensation execution gains Tw/Tp: `1.0 / 1.0`; FL common/differential: `{result.fl_common_compensation_gain:.3f} / {result.fl_differential_compensation_gain:.3f}`; the observer uses the bounded, anti-windup disturbance innovation.",
         "- Exchange maps: state `[x,dx,-psi,-dpsi,theta,dtheta,-phi,-dphi,L,dL,beta2,dbeta2,beta1,dbeta1]`; input `[Tw2,Tw1,Tp2,Tp1,Fl2,Fl1]`.",
         f"- Verified fixed structure: only columns `{G_SCHEDULED_COLUMN_OFFSET}..{config.N_X - 1}` of `G-I` are scheduled; `G[0,1]` and `G[2,3]` remain exactly `Ts`.",
         "",
@@ -1728,7 +1844,7 @@ def render_summary(result: LesoScheduleFit) -> str:
             f"- Fitted observer max radius, train/holdout: `{observer.fitted_train_max_radius:.9f}` / `{observer.fitted_holdout_max_radius:.9f}`",
             f"- Float32 observer max radius, train/holdout: `{observer.float32_train_max_radius:.9f}` / `{observer.float32_holdout_max_radius:.9f}`",
             f"- Minimum float32 observer pole margin: `{observer.minimum_float32_margin:.9f}`",
-            f"- Float32 plant + current-model reference LQR + LESO max radius, train/holdout: `{downstream.float32_train_max_radius:.9f}` / `{downstream.float32_holdout_max_radius:.9f}`",
+            f"- Float32 plant + measured-state reference LQR + LESO max radius, train/holdout: `{downstream.float32_train_max_radius:.9f}` / `{downstream.float32_holdout_max_radius:.9f}`",
             f"- Minimum downstream closed-loop pole margin: `{downstream.minimum_float32_margin:.9f}`",
             f"- Fixed-structure residual: `{result.max_fixed_structure_residual:.6e}`",
             f"- Raw exchange-symmetry residual, train/holdout: `{result.max_training_symmetry_residual:.6e}` / `{result.max_holdout_symmetry_residual:.6e}`",
@@ -1774,6 +1890,15 @@ def save_result(
         disturbance_bandwidths_hz=result.disturbance_bandwidths_hz,
         state_poles=result.state_poles,
         disturbance_poles=result.disturbance_poles,
+        disturbance_leak_bandwidth_hz=result.disturbance_leak_bandwidth_hz,
+        disturbance_retention_pole=result.disturbance_retention_pole,
+        disturbance_limits=result.disturbance_limits,
+        disturbance_maximum_increments=(
+            result.disturbance_maximum_increments
+        ),
+        constant_disturbance_tracking_fraction=(
+            result.constant_disturbance_tracking_fraction
+        ),
         unmatched_state_bandwidth_hz=result.unmatched_state_bandwidth_hz,
         unmatched_state_pole=result.unmatched_state_pole,
         matched_state_coefficients=result.matched_state_coefficients,
@@ -1838,6 +1963,19 @@ def save_result(
             ),
             "state_poles": result.state_poles.tolist(),
             "disturbance_poles": result.disturbance_poles.tolist(),
+            "disturbance_leak_bandwidth_hz": (
+                result.disturbance_leak_bandwidth_hz
+            ),
+            "disturbance_retention_pole": (
+                result.disturbance_retention_pole
+            ),
+            "disturbance_limits": result.disturbance_limits.tolist(),
+            "disturbance_maximum_increments": (
+                result.disturbance_maximum_increments.tolist()
+            ),
+            "constant_disturbance_tracking_fraction": (
+                result.constant_disturbance_tracking_fraction.tolist()
+            ),
             "unmatched_state_bandwidth_hz": (
                 result.unmatched_state_bandwidth_hz
             ),
@@ -1868,7 +2006,9 @@ def save_result(
             "matrix": result.fl_compensation_matrix.tolist(),
         },
         "downstream_closed_loop": {
-            "controller": "current-host-model cubic L1/L2 reference LQR",
+            "controller": (
+                "current-host-model cubic L1/L2 measured-state reference LQR"
+            ),
             "float32_train_max_radius": result.downstream_metrics.float32_train_max_radius,
             "float32_holdout_max_radius": result.downstream_metrics.float32_holdout_max_radius,
             "minimum_float32_margin": result.downstream_metrics.minimum_float32_margin,
@@ -1890,9 +2030,14 @@ def main() -> None:
     parser.add_argument("--step", type=float, default=0.01)
     parser.add_argument("--degree", type=int, default=DEFAULT_TOTAL_DEGREE)
     parser.add_argument(
-        "--torque-state-bandwidth-hz",
+        "--wheel-state-bandwidth-hz",
         type=float,
-        default=DEFAULT_TORQUE_STATE_BANDWIDTH_HZ,
+        default=DEFAULT_WHEEL_STATE_BANDWIDTH_HZ,
+    )
+    parser.add_argument(
+        "--hip-state-bandwidth-hz",
+        type=float,
+        default=DEFAULT_HIP_STATE_BANDWIDTH_HZ,
     )
     parser.add_argument(
         "--torque-disturbance-bandwidth-hz",
@@ -1913,6 +2058,16 @@ def main() -> None:
         "--unmatched-state-bandwidth-hz",
         type=float,
         default=DEFAULT_UNMATCHED_STATE_BANDWIDTH_HZ,
+    )
+    parser.add_argument(
+        "--disturbance-leak-bandwidth-hz",
+        type=float,
+        default=DEFAULT_DISTURBANCE_LEAK_BANDWIDTH_HZ,
+    )
+    parser.add_argument(
+        "--disturbance-limit-ratio",
+        type=float,
+        default=DEFAULT_DISTURBANCE_LIMIT_RATIO,
     )
     parser.add_argument(
         "--compensation-cutoff-hz",
@@ -1937,13 +2092,16 @@ def main() -> None:
     result = compute_leso_schedule(
         step=args.step,
         total_degree=args.degree,
-        torque_state_bandwidth_hz=args.torque_state_bandwidth_hz,
+        wheel_state_bandwidth_hz=args.wheel_state_bandwidth_hz,
+        hip_state_bandwidth_hz=args.hip_state_bandwidth_hz,
         torque_disturbance_bandwidth_hz=(
             args.torque_disturbance_bandwidth_hz
         ),
         fl_state_bandwidth_hz=args.fl_state_bandwidth_hz,
         fl_disturbance_bandwidth_hz=args.fl_disturbance_bandwidth_hz,
         unmatched_state_bandwidth_hz=args.unmatched_state_bandwidth_hz,
+        disturbance_leak_bandwidth_hz=args.disturbance_leak_bandwidth_hz,
+        disturbance_limit_ratio=args.disturbance_limit_ratio,
         compensation_cutoff_hz=args.compensation_cutoff_hz,
         fl_common_compensation_gain=args.fl_common_compensation_gain,
         fl_differential_compensation_gain=args.fl_differential_compensation_gain,
@@ -1958,14 +2116,18 @@ def main() -> None:
 __all__ = [
     "COMPENSATION_FILTER_ORDER",
     "DEFAULT_COMPENSATION_CUTOFF_HZ",
+    "DEFAULT_DISTURBANCE_LEAK_BANDWIDTH_HZ",
+    "DEFAULT_DISTURBANCE_LIMIT_RATIO",
     "DEFAULT_FL_COMMON_COMPENSATION_GAIN",
     "DEFAULT_FL_DIFFERENTIAL_COMPENSATION_GAIN",
     "DEFAULT_FL_DISTURBANCE_BANDWIDTH_HZ",
     "DEFAULT_FL_STATE_BANDWIDTH_HZ",
+    "DEFAULT_HIP_STATE_BANDWIDTH_HZ",
     "DEFAULT_TOTAL_DEGREE",
     "DEFAULT_TORQUE_DISTURBANCE_BANDWIDTH_HZ",
     "DEFAULT_TORQUE_STATE_BANDWIDTH_HZ",
     "DEFAULT_UNMATCHED_STATE_BANDWIDTH_HZ",
+    "DEFAULT_WHEEL_STATE_BANDWIDTH_HZ",
     "G_SCHEDULED_COLUMN_COUNT",
     "G_SCHEDULED_COLUMN_OFFSET",
     "INPUT_EXCHANGE",

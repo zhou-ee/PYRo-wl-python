@@ -3,7 +3,7 @@
 The firmware uses the split observer
 
 ``x_hat+ = G x_hat + H (u + d_hat) + L_x (y - x_hat)``
-``d_hat+ = d_hat + L_d (y - x_hat)``.
+``d_hat+ = a_d d_hat + L_d (y - x_hat)``.
 
 All quantities stay in their physical SI coordinates.  The observer design is
 an analytic multi-input pole placement for a full-state measurement; it avoids
@@ -20,11 +20,15 @@ import numpy as np
 from ..core import config
 
 
-DEFAULT_TORQUE_STATE_BANDWIDTH_HZ = 80.0
+DEFAULT_WHEEL_STATE_BANDWIDTH_HZ = 100.0
+DEFAULT_HIP_STATE_BANDWIDTH_HZ = 80.0
+# Backward-compatible aggregate name; new scheduling code separates Tw and Tp.
+DEFAULT_TORQUE_STATE_BANDWIDTH_HZ = DEFAULT_HIP_STATE_BANDWIDTH_HZ
 DEFAULT_TORQUE_DISTURBANCE_BANDWIDTH_HZ = 2.4
 DEFAULT_FL_STATE_BANDWIDTH_HZ = 25.0
 DEFAULT_FL_DISTURBANCE_BANDWIDTH_HZ = 1.2
 DEFAULT_UNMATCHED_STATE_BANDWIDTH_HZ = 25.0
+DEFAULT_DISTURBANCE_LEAK_BANDWIDTH_HZ = 0.2
 
 
 def discrete_pole_from_bandwidth(
@@ -40,8 +44,11 @@ def discrete_pole_from_bandwidth(
     return float(np.exp(-2.0 * np.pi * bandwidth_hz * sample_time))
 
 
-_DEFAULT_TORQUE_STATE_POLE = discrete_pole_from_bandwidth(
-    DEFAULT_TORQUE_STATE_BANDWIDTH_HZ
+_DEFAULT_WHEEL_STATE_POLE = discrete_pole_from_bandwidth(
+    DEFAULT_WHEEL_STATE_BANDWIDTH_HZ
+)
+_DEFAULT_HIP_STATE_POLE = discrete_pole_from_bandwidth(
+    DEFAULT_HIP_STATE_BANDWIDTH_HZ
 )
 _DEFAULT_FL_STATE_POLE = discrete_pole_from_bandwidth(
     DEFAULT_FL_STATE_BANDWIDTH_HZ
@@ -53,7 +60,9 @@ _DEFAULT_FL_DISTURBANCE_POLE = discrete_pole_from_bandwidth(
     DEFAULT_FL_DISTURBANCE_BANDWIDTH_HZ
 )
 DEFAULT_STATE_POLES = np.asarray(
-    [_DEFAULT_TORQUE_STATE_POLE] * 4 + [_DEFAULT_FL_STATE_POLE] * 2,
+    [_DEFAULT_WHEEL_STATE_POLE] * 2
+    + [_DEFAULT_HIP_STATE_POLE] * 2
+    + [_DEFAULT_FL_STATE_POLE] * 2,
     dtype=float,
 )
 DEFAULT_DISTURBANCE_POLES = np.asarray(
@@ -63,6 +72,9 @@ DEFAULT_DISTURBANCE_POLES = np.asarray(
 )
 DEFAULT_UNMATCHED_STATE_POLE = discrete_pole_from_bandwidth(
     DEFAULT_UNMATCHED_STATE_BANDWIDTH_HZ
+)
+DEFAULT_DISTURBANCE_RETENTION_POLE = discrete_pole_from_bandwidth(
+    DEFAULT_DISTURBANCE_LEAK_BANDWIDTH_HZ
 )
 DEFAULT_STATE_POLES.setflags(write=False)
 DEFAULT_DISTURBANCE_POLES.setflags(write=False)
@@ -76,6 +88,7 @@ class LesoCorrection:
     disturbance_gain: np.ndarray
     state_poles: np.ndarray
     disturbance_poles: np.ndarray
+    disturbance_retention_pole: float
     unmatched_state_pole: float
     matched_state_coefficients: np.ndarray
     disturbance_couplings: np.ndarray
@@ -115,25 +128,39 @@ def _validate_discrete_model(
     return state_matrix, input_matrix
 
 
+def _validate_retention_pole(value: float) -> float:
+    value = float(value)
+    if not np.isfinite(value) or not 0.0 < value < 1.0:
+        raise ValueError(
+            "disturbance_retention_pole must lie strictly inside (0, 1)"
+        )
+    return value
+
+
 def build_augmented_model(
     state_matrix: np.ndarray,
     input_matrix: np.ndarray,
+    disturbance_retention_pole: float = DEFAULT_DISTURBANCE_RETENTION_POLE,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Return ``Ae``, ``Be`` and ``Ce`` for offline checks.
 
-    The six expanded states are constant input-equivalent disturbances.
+    The six expanded states are slowly leaking input-equivalent disturbances.
     Runtime code uses the split form and does not materialize these matrices.
     """
 
     state_matrix, input_matrix = _validate_discrete_model(
         state_matrix, input_matrix
     )
+    disturbance_retention_pole = _validate_retention_pole(
+        disturbance_retention_pole
+    )
     augmented_state = np.block(
         [
             [state_matrix, input_matrix],
             [
                 np.zeros((config.N_U, config.N_X), dtype=float),
-                np.eye(config.N_U, dtype=float),
+                disturbance_retention_pole
+                * np.eye(config.N_U, dtype=float),
             ],
         ]
     )
@@ -155,16 +182,18 @@ def design_leso_correction(
     *,
     state_poles: np.ndarray | float | None = None,
     disturbance_poles: np.ndarray | float | None = None,
+    disturbance_retention_pole: float = DEFAULT_DISTURBANCE_RETENTION_POLE,
     unmatched_state_pole: float = DEFAULT_UNMATCHED_STATE_POLE,
     pinv_rcond: float = 1.0e-12,
 ) -> LesoCorrection:
     """Design a deterministic, mirror-equivariant LESO correction.
 
-    Let ``H+`` be the Moore-Penrose inverse of the full-column-rank ``H``.
-    For each input channel ``i``, choose
+    Let ``H+`` be the Moore-Penrose inverse of the full-column-rank ``H`` and
+    let ``a_d`` be the disturbance-retention pole.  For each input channel
+    ``i``, choose
 
-    ``alpha_i = state_pole_i + disturbance_pole_i - 1`` and
-    ``gamma_i = (1-state_pole_i) (1-disturbance_pole_i)``.
+    ``alpha_i = state_pole_i + disturbance_pole_i - a_d`` and
+    ``gamma_i = state_pole_i disturbance_pole_i - a_d alpha_i``.
 
     Let ``Alpha=diag(alpha_i)``, ``Gamma=diag(gamma_i)`` and let
     ``p_u`` be the pole assigned to the state-error complement of ``range(H)``.
@@ -211,6 +240,9 @@ def design_leso_correction(
         DEFAULT_DISTURBANCE_POLES,
         "disturbance_poles",
     )
+    disturbance_retention_pole = _validate_retention_pole(
+        disturbance_retention_pole
+    )
     if not np.isfinite(unmatched_state_pole) or not (
         0.0 < unmatched_state_pole < 1.0
     ):
@@ -220,8 +252,18 @@ def design_leso_correction(
     if np.linalg.matrix_rank(input_matrix) != config.N_U:
         raise ValueError("input_matrix must have full disturbance-channel rank")
 
-    matched_coefficients = state_poles + disturbance_poles - 1.0
-    couplings = (1.0 - state_poles) * (1.0 - disturbance_poles)
+    matched_coefficients = (
+        state_poles + disturbance_poles - disturbance_retention_pole
+    )
+    couplings = (
+        state_poles * disturbance_poles
+        - disturbance_retention_pole * matched_coefficients
+    )
+    if np.any(couplings <= 0.0):
+        raise ValueError(
+            "observer poles and disturbance retention produce a "
+            "non-positive disturbance coupling"
+        )
     input_inverse = np.linalg.pinv(input_matrix, rcond=pinv_rcond)
     matched_offset = matched_coefficients - unmatched_state_pole
     state_error_matrix = (
@@ -237,6 +279,7 @@ def design_leso_correction(
         disturbance_gain=np.asarray(disturbance_gain, dtype=float),
         state_poles=state_poles,
         disturbance_poles=disturbance_poles,
+        disturbance_retention_pole=float(disturbance_retention_pole),
         unmatched_state_pole=float(unmatched_state_pole),
         matched_state_coefficients=matched_coefficients,
         disturbance_couplings=couplings,
@@ -249,11 +292,15 @@ def observer_error_matrix(
     input_matrix: np.ndarray,
     state_gain: np.ndarray,
     disturbance_gain: np.ndarray,
+    disturbance_retention_pole: float = DEFAULT_DISTURBANCE_RETENTION_POLE,
 ) -> np.ndarray:
     """Return the homogeneous augmented estimation-error transition matrix."""
 
     state_matrix, input_matrix = _validate_discrete_model(
         state_matrix, input_matrix
+    )
+    disturbance_retention_pole = _validate_retention_pole(
+        disturbance_retention_pole
     )
     state_gain = np.asarray(state_gain, dtype=float)
     disturbance_gain = np.asarray(disturbance_gain, dtype=float)
@@ -264,7 +311,10 @@ def observer_error_matrix(
     return np.block(
         [
             [state_matrix - state_gain, input_matrix],
-            [-disturbance_gain, np.eye(config.N_U)],
+            [
+                -disturbance_gain,
+                disturbance_retention_pole * np.eye(config.N_U),
+            ],
         ]
     )
 
@@ -274,6 +324,7 @@ def observer_error_spectral_radius(
     input_matrix: np.ndarray,
     state_gain: np.ndarray,
     disturbance_gain: np.ndarray,
+    disturbance_retention_pole: float = DEFAULT_DISTURBANCE_RETENTION_POLE,
 ) -> float:
     """Return ``rho(Ae - Le Ce)`` for one frozen scheduling point."""
 
@@ -283,6 +334,7 @@ def observer_error_spectral_radius(
             input_matrix,
             state_gain,
             disturbance_gain,
+            disturbance_retention_pole,
         )
     )
     return float(np.max(np.abs(poles)))
@@ -297,6 +349,7 @@ def step_leso_split(
     input_matrix: np.ndarray,
     state_gain: np.ndarray,
     disturbance_gain: np.ndarray,
+    disturbance_retention_pole: float = DEFAULT_DISTURBANCE_RETENTION_POLE,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Advance the same split LESO recurrence used by the firmware."""
 
@@ -304,6 +357,9 @@ def step_leso_split(
         state_matrix, input_matrix
     )
     estimated_state = np.asarray(estimated_state, dtype=float).reshape(-1)
+    disturbance_retention_pole = _validate_retention_pole(
+        disturbance_retention_pole
+    )
     estimated_disturbance = np.asarray(
         estimated_disturbance, dtype=float
     ).reshape(-1)
@@ -323,22 +379,68 @@ def step_leso_split(
         + input_matrix @ (applied_input_delta + estimated_disturbance)
         + np.asarray(state_gain, dtype=float) @ innovation
     )
-    next_disturbance = estimated_disturbance + np.asarray(
-        disturbance_gain, dtype=float
-    ) @ innovation
+    next_disturbance = (
+        disturbance_retention_pole * estimated_disturbance
+        + np.asarray(disturbance_gain, dtype=float) @ innovation
+    )
     return next_state, next_disturbance
 
 
+def bounded_disturbance_update(
+    estimated_disturbance: np.ndarray,
+    raw_increment: np.ndarray,
+    disturbance_limits: np.ndarray,
+    maximum_increments: np.ndarray,
+    *,
+    disturbance_retention_pole: float = DEFAULT_DISTURBANCE_RETENTION_POLE,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Apply the firmware's slew limit, leakage and anti-windup clamp.
+
+    The returned effective increment is the innovation actually accepted after
+    both clamps.  The state correction must use this same value so that a shock
+    rejected by the disturbance integrator is not reintroduced through the
+    fused ``L_x`` path.
+    """
+
+    estimated = np.asarray(estimated_disturbance, dtype=float).reshape(-1)
+    raw = np.asarray(raw_increment, dtype=float).reshape(-1)
+    limits = np.asarray(disturbance_limits, dtype=float).reshape(-1)
+    increments = np.asarray(maximum_increments, dtype=float).reshape(-1)
+    if not all(
+        values.shape == (config.N_U,)
+        for values in (estimated, raw, limits, increments)
+    ):
+        raise ValueError("disturbance vectors must contain N_U values")
+    if (
+        not np.all(np.isfinite(estimated))
+        or not np.all(np.isfinite(raw))
+        or not np.all(np.isfinite(limits))
+        or not np.all(np.isfinite(increments))
+        or np.any(limits <= 0.0)
+        or np.any(increments <= 0.0)
+    ):
+        raise ValueError("disturbance limits and values must be finite")
+    retained = _validate_retention_pole(disturbance_retention_pole) * estimated
+    slew_limited = np.clip(raw, -increments, increments)
+    next_disturbance = np.clip(retained + slew_limited, -limits, limits)
+    return next_disturbance, next_disturbance - retained
+
+
 __all__ = [
+    "DEFAULT_DISTURBANCE_LEAK_BANDWIDTH_HZ",
+    "DEFAULT_DISTURBANCE_RETENTION_POLE",
     "DEFAULT_DISTURBANCE_POLES",
     "DEFAULT_FL_DISTURBANCE_BANDWIDTH_HZ",
     "DEFAULT_FL_STATE_BANDWIDTH_HZ",
+    "DEFAULT_HIP_STATE_BANDWIDTH_HZ",
     "DEFAULT_STATE_POLES",
     "DEFAULT_TORQUE_DISTURBANCE_BANDWIDTH_HZ",
     "DEFAULT_TORQUE_STATE_BANDWIDTH_HZ",
+    "DEFAULT_WHEEL_STATE_BANDWIDTH_HZ",
     "DEFAULT_UNMATCHED_STATE_BANDWIDTH_HZ",
     "DEFAULT_UNMATCHED_STATE_POLE",
     "LesoCorrection",
+    "bounded_disturbance_update",
     "build_augmented_model",
     "design_leso_correction",
     "discrete_pole_from_bandwidth",

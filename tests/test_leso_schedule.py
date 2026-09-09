@@ -32,17 +32,52 @@ def test_schedule_meets_float32_holdout_and_observer_budgets(coarse_schedule):
     result = coarse_schedule
     np.testing.assert_array_equal(
         result.state_bandwidths_hz,
-        np.asarray([80.0, 80.0, 80.0, 80.0, 25.0, 25.0]),
+        np.asarray([100.0, 100.0, 80.0, 80.0, 25.0, 25.0]),
     )
     np.testing.assert_array_equal(
         result.disturbance_bandwidths_hz,
         np.asarray([2.4, 2.4, 2.4, 2.4, 1.2, 1.2]),
     )
-    assert result.state_poles[0] == pytest.approx(0.604922563)
+    assert result.state_poles[0] == pytest.approx(0.533488091)
+    assert result.state_poles[2] == pytest.approx(0.604922562)
     assert result.state_poles[4] == pytest.approx(0.854635999)
     assert result.disturbance_poles[0] == pytest.approx(0.985033484)
     assert result.disturbance_poles[4] == pytest.approx(0.992488531)
     assert result.unmatched_state_pole == pytest.approx(0.854635999)
+    assert result.disturbance_leak_bandwidth_hz == pytest.approx(0.2)
+    assert result.disturbance_retention_pole == pytest.approx(0.998744152)
+    np.testing.assert_allclose(
+        result.disturbance_limits,
+        np.asarray([0.32666417, 0.32666417, 6.0, 6.0, 30.0, 30.0]),
+    )
+    np.testing.assert_allclose(
+        result.disturbance_maximum_increments,
+        np.asarray(
+            [
+                0.004889024,
+                0.004889024,
+                0.089799099,
+                0.089799099,
+                0.225344077,
+                0.225344077,
+            ]
+        ),
+        rtol=2.0e-7,
+    )
+    np.testing.assert_allclose(
+        result.constant_disturbance_tracking_fraction,
+        np.asarray(
+            [
+                0.91362339,
+                0.91362339,
+                0.91317749,
+                0.91317749,
+                0.82561438,
+                0.82561438,
+            ]
+        ),
+        rtol=2.0e-7,
+    )
     assert result.compensation_cutoff_hz == pytest.approx(15.0)
     assert result.fl_common_compensation_gain == pytest.approx(0.10)
     assert result.fl_differential_compensation_gain == pytest.approx(0.30)
@@ -194,6 +229,10 @@ def test_generated_firmware_block_and_artifacts_are_deterministic(
     assert "LESO_MATCHED_CORRECTION_SCALE[INPUT_DIM]" in coefficients
     assert "LESO_UNMATCHED_STATE_BANDWIDTH_HZ = 2.500000000e+01f" in coefficients
     assert "LESO_UNMATCHED_POLE = 8.546360135e-01f" in coefficients
+    assert "LESO_DISTURBANCE_LEAK_BANDWIDTH_HZ = 2.000000030e-01f" in coefficients
+    assert "LESO_DISTURBANCE_RETENTION_POLE = 9.987441301e-01f" in coefficients
+    assert "LESO_DISTURBANCE_LIMIT[INPUT_DIM]" in coefficients
+    assert "LESO_DISTURBANCE_MAX_INCREMENT[INPUT_DIM]" in coefficients
     assert "LESO_COMPENSATION_FILTER_ORDER = 3" in coefficients
     assert "LESO_COMPENSATION_FILTER_STAGE_ALPHA = 1.685073525e-01f" in coefficients
     assert "LESO_COMPENSATION_GAIN[INPUT_DIM]" in coefficients
@@ -253,6 +292,20 @@ def test_generated_firmware_block_and_artifacts_are_deterministic(
         assert float(archive["unmatched_state_bandwidth_hz"]) == pytest.approx(
             25.0
         )
+        assert float(archive["disturbance_leak_bandwidth_hz"]) == pytest.approx(
+            0.2
+        )
+        assert float(archive["disturbance_retention_pole"]) == pytest.approx(
+            0.998744152
+        )
+        np.testing.assert_allclose(
+            archive["disturbance_maximum_increments"],
+            coarse_schedule.disturbance_maximum_increments,
+        )
+        np.testing.assert_allclose(
+            archive["constant_disturbance_tracking_fraction"],
+            coarse_schedule.constant_disturbance_tracking_fraction,
+        )
         np.testing.assert_allclose(
             archive["compensation_matrix"][4:, 4:],
             np.asarray([[0.2, -0.1], [-0.1, 0.2]], dtype=np.float32),
@@ -277,8 +330,14 @@ def test_schedule_rejects_invalid_observer_bandwidth(bandwidth):
     with pytest.raises(ValueError, match="observer bandwidths"):
         compute_leso_schedule(
             step=0.04,
-            torque_state_bandwidth_hz=bandwidth,
+            wheel_state_bandwidth_hz=bandwidth,
         )
+
+
+@pytest.mark.parametrize("ratio", [0.0, 1.01, np.nan])
+def test_schedule_rejects_invalid_disturbance_limit_ratio(ratio):
+    with pytest.raises(ValueError, match="disturbance_limit_ratio"):
+        compute_leso_schedule(step=0.04, disturbance_limit_ratio=ratio)
 
 
 def test_firmware_renderer_rejects_nonuniform_ranks(coarse_schedule):

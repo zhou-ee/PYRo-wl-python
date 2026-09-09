@@ -1,11 +1,15 @@
 import numpy as np
+import pytest
 
 from wheel_leg_lqr.control.leso import (
+    DEFAULT_DISTURBANCE_RETENTION_POLE,
     DEFAULT_FL_DISTURBANCE_BANDWIDTH_HZ,
     DEFAULT_FL_STATE_BANDWIDTH_HZ,
+    DEFAULT_HIP_STATE_BANDWIDTH_HZ,
     DEFAULT_TORQUE_DISTURBANCE_BANDWIDTH_HZ,
-    DEFAULT_TORQUE_STATE_BANDWIDTH_HZ,
     DEFAULT_UNMATCHED_STATE_POLE,
+    DEFAULT_WHEEL_STATE_BANDWIDTH_HZ,
+    bounded_disturbance_update,
     build_augmented_model,
     design_leso_correction,
     discrete_pole_from_bandwidth,
@@ -13,6 +17,7 @@ from wheel_leg_lqr.control.leso import (
     observer_error_spectral_radius,
     step_leso_split,
 )
+from wheel_leg_lqr.core import config
 from wheel_leg_lqr.gain_schedule import compute_gain_node
 from wheel_leg_lqr.numeric_config import N_U, N_X
 from wheel_leg_lqr.scheduling.leso_schedule import INPUT_EXCHANGE, STATE_EXCHANGE
@@ -50,8 +55,12 @@ def test_analytic_leso_has_the_requested_augmented_poles():
         correction.disturbance_gain,
     ) < 1.0
     np.testing.assert_allclose(
-        correction.state_poles[:4],
-        discrete_pole_from_bandwidth(DEFAULT_TORQUE_STATE_BANDWIDTH_HZ),
+        correction.state_poles[:2],
+        discrete_pole_from_bandwidth(DEFAULT_WHEEL_STATE_BANDWIDTH_HZ),
+    )
+    np.testing.assert_allclose(
+        correction.state_poles[2:4],
+        discrete_pole_from_bandwidth(DEFAULT_HIP_STATE_BANDWIDTH_HZ),
     )
     np.testing.assert_allclose(
         correction.state_poles[4:],
@@ -68,6 +77,10 @@ def test_analytic_leso_has_the_requested_augmented_poles():
         discrete_pole_from_bandwidth(DEFAULT_FL_DISTURBANCE_BANDWIDTH_HZ),
     )
     assert correction.unmatched_state_pole == DEFAULT_UNMATCHED_STATE_POLE
+    assert (
+        correction.disturbance_retention_pole
+        == DEFAULT_DISTURBANCE_RETENTION_POLE
+    )
 
     fused_state_gain = (
         node.Ad
@@ -123,6 +136,69 @@ def test_split_update_matches_the_augmented_observer_equation():
         atol=2.0e-13,
         rtol=2.0e-13,
     )
+
+
+def test_bounded_disturbance_update_limits_shock_and_prevents_windup():
+    estimated = np.asarray([0.3, -0.3, 5.9, -5.9, 29.9, -29.9])
+    raw_increment = np.asarray([1.0, -1.0, 4.0, -4.0, 20.0, -20.0])
+    limits = np.asarray([0.33, 0.33, 6.0, 6.0, 30.0, 30.0])
+    maximum_increments = np.asarray(
+        [0.005, 0.005, 0.09, 0.09, 0.225, 0.225]
+    )
+
+    next_disturbance, accepted_increment = bounded_disturbance_update(
+        estimated,
+        raw_increment,
+        limits,
+        maximum_increments,
+    )
+    retained = DEFAULT_DISTURBANCE_RETENTION_POLE * estimated
+    expected = np.clip(
+        retained
+        + np.clip(raw_increment, -maximum_increments, maximum_increments),
+        -limits,
+        limits,
+    )
+    np.testing.assert_allclose(next_disturbance, expected)
+    np.testing.assert_allclose(
+        accepted_increment, next_disturbance - retained
+    )
+    assert np.all(np.abs(next_disturbance) <= limits)
+    assert np.all(np.abs(accepted_increment) <= maximum_increments + 1.0e-15)
+
+
+def test_leg_velocity_impact_is_limited_before_reaching_state_correction():
+    node = compute_gain_node(0.20, 0.20)
+    correction = design_leso_correction(node.Ad, node.Bd)
+    residual = np.zeros(N_X)
+    residual[9] = 1.0
+    raw_increment = correction.disturbance_gain @ residual
+    limits = 0.10 * config.INPUT_UPPER_LIMITS
+    maximum_increments = (1.0 - correction.disturbance_poles) * limits
+
+    _, accepted_increment = bounded_disturbance_update(
+        np.zeros(N_U),
+        raw_increment,
+        limits,
+        maximum_increments,
+    )
+
+    # A 1 m/s leg-velocity residual asks for roughly 8.9 N in one update,
+    # while firmware may accept only 0.225 N.  The same accepted value is fed
+    # to the fused state correction, so the rejected shock cannot bypass it.
+    assert abs(raw_increment[4]) > 35.0 * maximum_increments[4]
+    assert abs(accepted_increment[4]) == pytest.approx(maximum_increments[4])
+
+
+@pytest.mark.parametrize("retention", [0.0, 1.0, np.nan])
+def test_leso_rejects_invalid_disturbance_retention(retention):
+    node = compute_gain_node(0.25, 0.31)
+    with pytest.raises(ValueError, match="disturbance_retention_pole"):
+        design_leso_correction(
+            node.Ad,
+            node.Bd,
+            disturbance_retention_pole=retention,
+        )
 
 
 def test_analytic_design_preserves_left_right_exchange_symmetry():

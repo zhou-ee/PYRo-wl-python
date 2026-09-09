@@ -1,15 +1,20 @@
 """Reusable control primitives."""
 
 from .leso import (
+    DEFAULT_DISTURBANCE_LEAK_BANDWIDTH_HZ,
     DEFAULT_DISTURBANCE_POLES,
+    DEFAULT_DISTURBANCE_RETENTION_POLE,
     DEFAULT_FL_DISTURBANCE_BANDWIDTH_HZ,
     DEFAULT_FL_STATE_BANDWIDTH_HZ,
+    DEFAULT_HIP_STATE_BANDWIDTH_HZ,
     DEFAULT_STATE_POLES,
     DEFAULT_TORQUE_DISTURBANCE_BANDWIDTH_HZ,
     DEFAULT_TORQUE_STATE_BANDWIDTH_HZ,
     DEFAULT_UNMATCHED_STATE_BANDWIDTH_HZ,
     DEFAULT_UNMATCHED_STATE_POLE,
+    DEFAULT_WHEEL_STATE_BANDWIDTH_HZ,
     LesoCorrection,
+    bounded_disturbance_update,
     build_augmented_model,
     design_leso_correction,
     discrete_pole_from_bandwidth,
@@ -26,17 +31,22 @@ from .saturation import (
 )
 
 __all__ = [
+    "DEFAULT_DISTURBANCE_LEAK_BANDWIDTH_HZ",
     "DEFAULT_DISTURBANCE_POLES",
+    "DEFAULT_DISTURBANCE_RETENTION_POLE",
     "DEFAULT_FL_DISTURBANCE_BANDWIDTH_HZ",
     "DEFAULT_FL_STATE_BANDWIDTH_HZ",
+    "DEFAULT_HIP_STATE_BANDWIDTH_HZ",
     "DEFAULT_STATE_POLES",
     "DEFAULT_TORQUE_DISTURBANCE_BANDWIDTH_HZ",
     "DEFAULT_TORQUE_STATE_BANDWIDTH_HZ",
     "DEFAULT_UNMATCHED_STATE_BANDWIDTH_HZ",
     "DEFAULT_UNMATCHED_STATE_POLE",
+    "DEFAULT_WHEEL_STATE_BANDWIDTH_HZ",
     "LesoCorrection",
     "SaturationValidation",
     "build_augmented_model",
+    "bounded_disturbance_update",
     "controllability_rank",
     "default_initial_errors",
     "design_leso_correction",
