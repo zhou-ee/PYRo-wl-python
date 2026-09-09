@@ -13,6 +13,8 @@ from wheel_leg_lqr.scheduling.leso_schedule import (
     G_SCHEDULED_COLUMN_OFFSET,
     INPUT_EXCHANGE,
     STATE_EXCHANGE,
+    _compensation_filter_stage_alpha,
+    _compensation_filter_state_space,
     compute_leso_schedule,
     render_combined_coef_header,
     render_firmware_coefficients,
@@ -42,7 +44,12 @@ def test_schedule_meets_float32_holdout_and_observer_budgets(coarse_schedule):
     assert result.disturbance_poles[4] == pytest.approx(0.992488531)
     assert result.unmatched_state_pole == pytest.approx(0.854635999)
     assert result.compensation_cutoff_hz == pytest.approx(15.0)
-    assert result.fl_compensation_gain == pytest.approx(0.30)
+    assert result.fl_common_compensation_gain == pytest.approx(0.10)
+    assert result.fl_differential_compensation_gain == pytest.approx(0.30)
+    np.testing.assert_allclose(
+        result.fl_compensation_matrix[4:, 4:],
+        np.asarray([[0.2, -0.1], [-0.1, 0.2]]),
+    )
     assert result.g_schedule.total_degree == 4
     assert result.h_schedule.total_degree == 4
     assert result.ld_schedule.total_degree == 4
@@ -61,6 +68,39 @@ def test_schedule_meets_float32_holdout_and_observer_budgets(coarse_schedule):
     assert result.downstream_metrics.float32_train_max_radius < 0.9995
     assert result.downstream_metrics.float32_holdout_max_radius < 0.9995
     assert result.downstream_metrics.minimum_float32_margin > 5.0e-4
+
+
+def test_third_order_compensation_filter_keeps_15_hz_cutoff():
+    cutoff_hz = 15.0
+    alpha = np.float32(_compensation_filter_stage_alpha(cutoff_hz))
+    keep = np.float32(1.0) - alpha
+    omega = 2.0 * np.pi * cutoff_hz * SAMPLE_TIME
+    stage_magnitude = alpha / np.sqrt(
+        1.0 + keep * keep - 2.0 * keep * np.cos(omega)
+    )
+    assert stage_magnitude**3 == pytest.approx(
+        1.0 / np.sqrt(2.0), rel=2.0e-6
+    )
+
+
+def test_third_order_filter_model_matches_sequential_firmware_update():
+    alpha = np.float32(_compensation_filter_stage_alpha(15.0))
+    state_matrix, input_matrix, output_matrix, output_input = (
+        _compensation_filter_state_space(alpha)
+    )
+    rng = np.random.default_rng(20260909)
+    stages = rng.normal(size=(3, N_U))
+    disturbance = rng.normal(size=N_U)
+    expected = stages.copy()
+    for stage in range(3):
+        source = disturbance if stage == 0 else expected[stage - 1]
+        expected[stage] += alpha * (source - expected[stage])
+
+    flat_state = stages.reshape(-1)
+    modeled = state_matrix @ flat_state + input_matrix @ disturbance
+    output = output_matrix @ flat_state + output_input @ disturbance
+    np.testing.assert_allclose(modeled.reshape(3, N_U), expected)
+    np.testing.assert_allclose(output, expected[-1])
 
 
 def test_schedule_preserves_fixed_structure_and_exchange_off_grid(
@@ -154,9 +194,12 @@ def test_generated_firmware_block_and_artifacts_are_deterministic(
     assert "LESO_MATCHED_CORRECTION_SCALE[INPUT_DIM]" in coefficients
     assert "LESO_UNMATCHED_STATE_BANDWIDTH_HZ = 2.500000000e+01f" in coefficients
     assert "LESO_UNMATCHED_POLE = 8.546360135e-01f" in coefficients
-    assert "LESO_COMPENSATION_FILTER_ALPHA" in coefficients
+    assert "LESO_COMPENSATION_FILTER_ORDER = 3" in coefficients
+    assert "LESO_COMPENSATION_FILTER_STAGE_ALPHA = 1.685073525e-01f" in coefficients
     assert "LESO_COMPENSATION_GAIN[INPUT_DIM]" in coefficients
-    assert coefficients.count("3.000000119e-01f") == 2
+    assert "LESO_FL_COMMON_COMPENSATION_GAIN = 1.000000015e-01f" in coefficients
+    assert "LESO_FL_DIFFERENTIAL_COMPENSATION_GAIN = 3.000000119e-01f" in coefficients
+    assert coefficients.count("3.000000119e-01f") == 1
     assert "static_assert(STATE_DIM == 14 && INPUT_DIM == 6" not in coefficients
     assert "LESO fit dimensions no longer match the model" not in coefficients
     assert "LESO_G_EVEN_RANK" not in coefficients + runtime
@@ -197,22 +240,36 @@ def test_generated_firmware_block_and_artifacts_are_deterministic(
     assert (tmp_path / "leso_schedule.npz").is_file()
     assert (tmp_path / "leso_schedule.json").is_file()
     with np.load(tmp_path / "leso_schedule.npz") as archive:
-        assert float(archive["fl_compensation_gain"]) == pytest.approx(0.30)
+        assert float(archive["fl_common_compensation_gain"]) == pytest.approx(
+            0.10
+        )
+        assert float(archive["fl_differential_compensation_gain"]) == pytest.approx(
+            0.30
+        )
+        assert int(archive["compensation_filter_order"]) == 3
+        assert float(archive["compensation_filter_stage_alpha"]) == pytest.approx(
+            0.1685073539
+        )
         assert float(archive["unmatched_state_bandwidth_hz"]) == pytest.approx(
             25.0
         )
-        np.testing.assert_array_equal(
-            archive["compensation_gains"],
-            np.asarray(
-                [1.0, 1.0, 1.0, 1.0, 0.3, 0.3], dtype=np.float32
-            ),
+        np.testing.assert_allclose(
+            archive["compensation_matrix"][4:, 4:],
+            np.asarray([[0.2, -0.1], [-0.1, 0.2]], dtype=np.float32),
         )
 
 
+@pytest.mark.parametrize(
+    "argument",
+    [
+        "fl_common_compensation_gain",
+        "fl_differential_compensation_gain",
+    ],
+)
 @pytest.mark.parametrize("gain", [-0.01, 1.01, np.nan])
-def test_schedule_rejects_invalid_fl_compensation_gain(gain):
-    with pytest.raises(ValueError, match="fl_compensation_gain"):
-        compute_leso_schedule(step=0.04, fl_compensation_gain=gain)
+def test_schedule_rejects_invalid_fl_mode_gains(argument, gain):
+    with pytest.raises(ValueError, match=argument):
+        compute_leso_schedule(step=0.04, **{argument: gain})
 
 
 @pytest.mark.parametrize("bandwidth", [0.0, 500.0, np.nan])

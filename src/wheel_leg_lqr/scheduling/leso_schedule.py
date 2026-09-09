@@ -53,7 +53,9 @@ DEFAULT_H_ODD_RANK = 3
 DEFAULT_LD_EVEN_RANK = 3
 DEFAULT_LD_ODD_RANK = 3
 DEFAULT_COMPENSATION_CUTOFF_HZ = 15.0
-DEFAULT_FL_COMPENSATION_GAIN = 0.30
+COMPENSATION_FILTER_ORDER = 3
+DEFAULT_FL_COMMON_COMPENSATION_GAIN = 0.10
+DEFAULT_FL_DIFFERENTIAL_COMPENSATION_GAIN = 0.30
 
 G_SCHEDULED_COLUMN_OFFSET = 4
 G_SCHEDULED_COLUMN_COUNT = config.N_X - G_SCHEDULED_COLUMN_OFFSET
@@ -156,10 +158,20 @@ class LesoScheduleFit:
     disturbance_couplings: np.ndarray
     matched_correction_scales: np.ndarray
     compensation_cutoff_hz: float
-    fl_compensation_gain: float
+    fl_common_compensation_gain: float
+    fl_differential_compensation_gain: float
     max_training_symmetry_residual: float
     max_holdout_symmetry_residual: float
     max_fixed_structure_residual: float
+
+    @property
+    def fl_compensation_matrix(self) -> np.ndarray:
+        """Return the input-space compensation matrix used by the runtime."""
+
+        return _make_compensation_matrix(
+            self.fl_common_compensation_gain,
+            self.fl_differential_compensation_gain,
+        )
 
     def matrices(
         self,
@@ -585,26 +597,31 @@ def _downstream_closed_loop_radii(
     fitted_input_matrices: np.ndarray,
     fitted_state_gains: np.ndarray,
     fitted_disturbance_gains: np.ndarray,
-    compensation_filter_alpha: float,
-    compensation_gains: np.ndarray,
+    compensation_filter_stage_alpha: float,
+    compensation_matrix: np.ndarray,
 ) -> np.ndarray:
     """Return radii of the plant, LESO and filtered disturbance compensation."""
 
     radii = []
-    zero_input_state = np.zeros((config.N_U, config.N_X))
-    zero_input_input = np.zeros((config.N_U, config.N_U))
     disturbance_identity = np.eye(config.N_U)
-    filter_keep = 1.0 - compensation_filter_alpha
-    compensation_gains = np.asarray(compensation_gains, dtype=float)
-    if compensation_gains.shape != (config.N_U,):
+    compensation_matrix = np.asarray(compensation_matrix, dtype=float)
+    if compensation_matrix.shape != (config.N_U, config.N_U):
         raise ValueError(
-            f"compensation_gains must have shape ({config.N_U},)"
+            "compensation_matrix must have shape "
+            f"({config.N_U}, {config.N_U})"
         )
-    compensation_matrix = np.diag(compensation_gains)
+    (
+        filter_state_matrix,
+        filter_input_matrix,
+        filter_output_matrix,
+        filter_output_input,
+    ) = _compensation_filter_state_space(compensation_filter_stage_alpha)
+    filter_state_dim = filter_state_matrix.shape[0]
     observer_disturbance_matrix = (
-        disturbance_identity
-        - compensation_filter_alpha * compensation_matrix
+        disturbance_identity - compensation_matrix @ filter_output_input
     )
+    zero_filter_state = np.zeros((filter_state_dim, config.N_X))
+    zero_filter_input = np.zeros((config.N_U, filter_state_dim))
     for raw_g, raw_h, gain, fitted_g, fitted_h, fitted_lx, fitted_ld in zip(
         raw_state_matrices,
         raw_input_matrices,
@@ -621,31 +638,112 @@ def _downstream_closed_loop_radii(
                 [
                     raw_g,
                     -raw_h @ gain,
-                    -compensation_filter_alpha * raw_h_compensation,
-                    -filter_keep * raw_h_compensation,
+                    -raw_h_compensation @ filter_output_input,
+                    -raw_h_compensation @ filter_output_matrix,
                 ],
                 [
                     fitted_lx,
                     fitted_g - fitted_h @ gain - fitted_lx,
                     fitted_h @ observer_disturbance_matrix,
-                    -filter_keep * fitted_h_compensation,
+                    -fitted_h_compensation @ filter_output_matrix,
                 ],
                 [
                     fitted_ld,
                     -fitted_ld,
                     disturbance_identity,
-                    zero_input_input,
+                    zero_filter_input,
                 ],
                 [
-                    zero_input_state,
-                    zero_input_state,
-                    compensation_filter_alpha * disturbance_identity,
-                    filter_keep * disturbance_identity,
+                    zero_filter_state,
+                    zero_filter_state,
+                    filter_input_matrix,
+                    filter_state_matrix,
                 ],
             ]
         )
         radii.append(float(np.max(np.abs(np.linalg.eigvals(closed_loop)))))
     return np.asarray(radii)
+
+
+def _compensation_filter_state_space(
+    stage_alpha: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Return the exact state space of the firmware's sequential cascade."""
+
+    filter_state_dim = COMPENSATION_FILTER_ORDER * config.N_U
+    state_matrix = np.zeros((filter_state_dim, filter_state_dim))
+    input_matrix = np.zeros((filter_state_dim, config.N_U))
+    identity = np.eye(config.N_U)
+    keep = 1.0 - float(stage_alpha)
+    for stage in range(COMPENSATION_FILTER_ORDER):
+        row = stage * config.N_U
+        row_slice = slice(row, row + config.N_U)
+        state_matrix[row_slice, row_slice] = keep * identity
+        if stage == 0:
+            input_matrix[row_slice] = stage_alpha * identity
+            continue
+        previous = slice(row - config.N_U, row)
+        state_matrix[row_slice, :row] = (
+            stage_alpha * state_matrix[previous, :row]
+        )
+        input_matrix[row_slice] = stage_alpha * input_matrix[previous]
+    output_matrix = state_matrix[-config.N_U :, :].copy()
+    output_input = input_matrix[-config.N_U :, :].copy()
+    return state_matrix, input_matrix, output_matrix, output_input
+
+
+def _compensation_filter_stage_alpha(
+    cutoff_hz: float,
+    *,
+    order: int = COMPENSATION_FILTER_ORDER,
+    sample_time: float = config.SAMPLE_TIME,
+) -> float:
+    """Return each-stage alpha for an order-N cascade at the requested -3 dB cutoff."""
+
+    if order != 3:
+        raise ValueError("only a third-order compensation filter is supported")
+    omega = 2.0 * np.pi * float(cutoff_hz) * float(sample_time)
+    target_squared_magnitude = 2.0 ** (-1.0 / order)
+    cosine = np.cos(omega)
+    coefficient = 1.0 - target_squared_magnitude
+    linear = -2.0 + 2.0 * target_squared_magnitude * cosine
+    discriminant = linear * linear - 4.0 * coefficient * coefficient
+    if discriminant <= 0.0:
+        raise ValueError("compensation cutoff cannot be realized")
+    keep = (
+        -linear - np.sqrt(discriminant)
+    ) / (2.0 * coefficient)
+    return float(np.float32(1.0 - keep))
+
+
+def _make_compensation_matrix(
+    fl_common_compensation_gain: float,
+    fl_differential_compensation_gain: float,
+    *,
+    dtype: np.dtype | type = float,
+) -> np.ndarray:
+    """Build the input-space matrix for filtered disturbance compensation."""
+
+    matrix = np.eye(config.N_U, dtype=dtype)
+    common = np.asarray(fl_common_compensation_gain, dtype=float).item()
+    differential = np.asarray(
+        fl_differential_compensation_gain, dtype=float
+    ).item()
+    matrix[4:, 4:] = np.asarray(
+        [
+            [0.5 * (common + differential), 0.5 * (common - differential)],
+            [0.5 * (common - differential), 0.5 * (common + differential)],
+        ],
+        dtype=dtype,
+    )
+    return matrix
+
+
+def _validate_compensation_gain(value: float, name: str) -> float:
+    value = float(value)
+    if not np.isfinite(value) or not 0.0 <= value <= 1.0:
+        raise ValueError(f"{name} must lie in [0, 1]")
+    return value
 
 
 def compute_leso_schedule(
@@ -678,7 +776,10 @@ def compute_leso_schedule(
     observer_radius_limit: float = _DEFAULT_OBSERVER_RADIUS_LIMIT,
     closed_loop_radius_limit: float = _DEFAULT_CLOSED_LOOP_RADIUS_LIMIT,
     compensation_cutoff_hz: float = DEFAULT_COMPENSATION_CUTOFF_HZ,
-    fl_compensation_gain: float = DEFAULT_FL_COMPENSATION_GAIN,
+    fl_common_compensation_gain: float = DEFAULT_FL_COMMON_COMPENSATION_GAIN,
+    fl_differential_compensation_gain: float = (
+        DEFAULT_FL_DIFFERENTIAL_COMPENSATION_GAIN
+    ),
 ) -> LesoScheduleFit:
     """Fit and validate all matrices consumed by the firmware LESO chain."""
 
@@ -687,10 +788,13 @@ def compute_leso_schedule(
         raise ValueError(
             "compensation_cutoff_hz must lie strictly between zero and Nyquist"
         )
-    if not np.isfinite(fl_compensation_gain) or not (
-        0.0 <= fl_compensation_gain <= 1.0
-    ):
-        raise ValueError("fl_compensation_gain must lie in [0, 1]")
+    fl_common_compensation_gain = _validate_compensation_gain(
+        fl_common_compensation_gain, "fl_common_compensation_gain"
+    )
+    fl_differential_compensation_gain = _validate_compensation_gain(
+        fl_differential_compensation_gain,
+        "fl_differential_compensation_gain",
+    )
     bandwidths = np.asarray(
         [
             torque_state_bandwidth_hz,
@@ -990,19 +1094,16 @@ def compute_leso_schedule(
     float_holdout_gains = _evaluate_firmware_lqr_gain(
         gain_coefficients, holdout_points
     )
-    compensation_filter_alpha = float(
+    compensation_filter_stage_alpha = float(
         np.float32(
-            1.0
-            - np.exp(
-                -2.0
-                * np.pi
-                * compensation_cutoff_hz
-                * config.SAMPLE_TIME
-            )
+            _compensation_filter_stage_alpha(compensation_cutoff_hz)
         )
     )
-    compensation_gains = np.ones(config.N_U, dtype=np.float32)
-    compensation_gains[4:] = np.float32(fl_compensation_gain)
+    compensation_matrix = _make_compensation_matrix(
+        fl_common_compensation_gain,
+        fl_differential_compensation_gain,
+        dtype=np.float32,
+    )
     downstream_metrics = DownstreamMetrics(
         float32_train_max_radius=float(
             np.max(
@@ -1014,8 +1115,8 @@ def compute_leso_schedule(
                     float_train_fitted[1],
                     float_train_lx_fit,
                     float_train_fitted[2],
-                    compensation_filter_alpha,
-                    compensation_gains,
+                    compensation_filter_stage_alpha,
+                    compensation_matrix,
                 )
             )
         ),
@@ -1029,8 +1130,8 @@ def compute_leso_schedule(
                     float_holdout_fitted[1],
                     float_holdout_lx_fit,
                     float_holdout_fitted[2],
-                    compensation_filter_alpha,
-                    compensation_gains,
+                    compensation_filter_stage_alpha,
+                    compensation_matrix,
                 )
             )
         ),
@@ -1094,7 +1195,10 @@ def compute_leso_schedule(
         disturbance_couplings=correction.disturbance_couplings,
         matched_correction_scales=correction.matched_correction_scales,
         compensation_cutoff_hz=float(compensation_cutoff_hz),
-        fl_compensation_gain=float(fl_compensation_gain),
+        fl_common_compensation_gain=float(fl_common_compensation_gain),
+        fl_differential_compensation_gain=float(
+            fl_differential_compensation_gain
+        ),
         max_training_symmetry_residual=train_symmetry,
         max_holdout_symmetry_residual=holdout_symmetry,
         max_fixed_structure_residual=fixed_residual,
@@ -1252,15 +1356,19 @@ def _render_combined_firmware_block(result: LesoScheduleFit) -> str:
             result.matched_correction_scales,
         ),
         f"    constexpr float LESO_COMPENSATION_FILTER_CUTOFF_HZ = {_firmware_float(result.compensation_cutoff_hz)};",
-        "    constexpr float LESO_COMPENSATION_FILTER_ALPHA = "
-        f"{_firmware_float(1.0 - np.exp(-2.0 * np.pi * result.compensation_cutoff_hz * config.SAMPLE_TIME))};",
-        "    // Per-input execution gains: Tw1, Tw2, Tp1, Tp2, Fl1, Fl2.",
+        f"    constexpr uint32_t LESO_COMPENSATION_FILTER_ORDER = {COMPENSATION_FILTER_ORDER};",
+        "    constexpr float LESO_COMPENSATION_FILTER_STAGE_ALPHA = "
+        f"{_firmware_float(_compensation_filter_stage_alpha(result.compensation_cutoff_hz))};",
+        "    // FL compensation is decomposed into common and differential modes.",
+        "    constexpr float LESO_FL_COMMON_COMPENSATION_GAIN = "
+        f"{_firmware_float(result.fl_common_compensation_gain)};",
+        "    constexpr float LESO_FL_DIFFERENTIAL_COMPENSATION_GAIN = "
+        f"{_firmware_float(result.fl_differential_compensation_gain)};",
+        "    // Direct execution gains for Tw1, Tw2, Tp1, Tp2; FL uses the mode gains above.",
         "    constexpr float LESO_COMPENSATION_GAIN[INPUT_DIM] = {",
         "        1.000000000e+00f, 1.000000000e+00f,",
         "        1.000000000e+00f, 1.000000000e+00f,",
-        "        "
-        f"{_firmware_float(result.fl_compensation_gain)}, "
-        f"{_firmware_float(result.fl_compensation_gain)},",
+        "        0.000000000e+00f, 0.000000000e+00f,",
         "    };",
         "",
         "    static constexpr uint8_t LESO_TERMS[LESO_EVEN_TERM_COUNT][2] = {",
@@ -1546,8 +1654,10 @@ def _runtime_counts(result: LesoScheduleFit) -> dict[str, int]:
         + len(result.g_schedule.odd_terms)
         + sum(schedule.rank for schedule in schedules)
     )
-    compensation_filter_multiplies = 3 * config.N_U
-    compensation_filter_additions = 3 * config.N_U
+    # Six low-pass filters, four direct torque injections, and the two-mode
+    # FL reconstruction/injection performed by the firmware.
+    compensation_filter_multiplies = 34
+    compensation_filter_additions = 46
     return {
         "fit_multiplies": int(
             basis_multiplies + modal_multiplies + reconstruction_multiplies
@@ -1589,8 +1699,8 @@ def render_summary(result: LesoScheduleFit) -> str:
         f"- Disturbance-observer bandwidth Tw/Tp/Fl: `{result.disturbance_bandwidths_hz[0]:.3f} / {result.disturbance_bandwidths_hz[2]:.3f} / {result.disturbance_bandwidths_hz[4]:.3f} Hz`",
         f"- State poles Tw/Tp/Fl: `{result.state_poles[0]:.9f} / {result.state_poles[2]:.9f} / {result.state_poles[4]:.9f}`; disturbance poles: `{result.disturbance_poles[0]:.9f} / {result.disturbance_poles[2]:.9f} / {result.disturbance_poles[4]:.9f}`",
         f"- Unmatched-state pole: `{result.unmatched_state_pole:.9f}` (`{result.unmatched_state_bandwidth_hz:.3f} Hz`)",
-        f"- Disturbance-compensation low-pass: `{result.compensation_cutoff_hz:.3f} Hz` (1 kHz alpha `{1.0 - np.exp(-2.0 * np.pi * result.compensation_cutoff_hz * config.SAMPLE_TIME):.9f}`)",
-        f"- Compensation execution gains Tw/Tp/Fl: `1.0 / 1.0 / {result.fl_compensation_gain:.3f}`; observer feedback still uses the full raw disturbance estimate.",
+        f"- Disturbance-compensation low-pass: third-order cascade, overall cutoff `{result.compensation_cutoff_hz:.3f} Hz` (stage alpha `{_compensation_filter_stage_alpha(result.compensation_cutoff_hz):.9f}`)",
+        f"- Compensation execution gains Tw/Tp: `1.0 / 1.0`; FL common/differential: `{result.fl_common_compensation_gain:.3f} / {result.fl_differential_compensation_gain:.3f}`; observer feedback still uses the full raw disturbance estimate.",
         "- Exchange maps: state `[x,dx,-psi,-dpsi,theta,dtheta,-phi,-dphi,L,dL,beta2,dbeta2,beta1,dbeta1]`; input `[Tw2,Tw1,Tp2,Tp1,Fl2,Fl1]`.",
         f"- Verified fixed structure: only columns `{G_SCHEDULED_COLUMN_OFFSET}..{config.N_X - 1}` of `G-I` are scheduled; `G[0,1]` and `G[2,3]` remain exactly `Ts`.",
         "",
@@ -1670,27 +1780,13 @@ def save_result(
         disturbance_couplings=result.disturbance_couplings,
         matched_correction_scales=result.matched_correction_scales,
         compensation_cutoff_hz=result.compensation_cutoff_hz,
-        compensation_filter_alpha=(
-            1.0
-            - np.exp(
-                -2.0
-                * np.pi
-                * result.compensation_cutoff_hz
-                * config.SAMPLE_TIME
-            )
+        compensation_filter_order=COMPENSATION_FILTER_ORDER,
+        compensation_filter_stage_alpha=_compensation_filter_stage_alpha(
+            result.compensation_cutoff_hz
         ),
-        fl_compensation_gain=result.fl_compensation_gain,
-        compensation_gains=np.asarray(
-            [
-                1.0,
-                1.0,
-                1.0,
-                1.0,
-                result.fl_compensation_gain,
-                result.fl_compensation_gain,
-            ],
-            dtype=np.float32,
-        ),
+        fl_common_compensation_gain=result.fl_common_compensation_gain,
+        fl_differential_compensation_gain=result.fl_differential_compensation_gain,
+        compensation_matrix=result.fl_compensation_matrix.astype(np.float32),
         total_degree=result.g_schedule.total_degree,
         g_mean=result.g_schedule.mean_matrix,
         g_even_modes=result.g_schedule.even_modes,
@@ -1759,18 +1855,17 @@ def save_result(
         },
         "compensation_filter": {
             "cutoff_hz": result.compensation_cutoff_hz,
-            "alpha": 1.0
-            - np.exp(
-                -2.0
-                * np.pi
-                * result.compensation_cutoff_hz
-                * config.SAMPLE_TIME
+            "order": COMPENSATION_FILTER_ORDER,
+            "stage_alpha": _compensation_filter_stage_alpha(
+                result.compensation_cutoff_hz
             ),
             "execution_gains": {
                 "wheel_torque": 1.0,
                 "hip_torque": 1.0,
-                "leg_force": result.fl_compensation_gain,
+                "leg_force_common": result.fl_common_compensation_gain,
+                "leg_force_differential": result.fl_differential_compensation_gain,
             },
+            "matrix": result.fl_compensation_matrix.tolist(),
         },
         "downstream_closed_loop": {
             "controller": "current-host-model cubic L1/L2 reference LQR",
@@ -1825,9 +1920,14 @@ def main() -> None:
         default=DEFAULT_COMPENSATION_CUTOFF_HZ,
     )
     parser.add_argument(
-        "--fl-compensation-gain",
+        "--fl-common-compensation-gain",
         type=float,
-        default=DEFAULT_FL_COMPENSATION_GAIN,
+        default=DEFAULT_FL_COMMON_COMPENSATION_GAIN,
+    )
+    parser.add_argument(
+        "--fl-differential-compensation-gain",
+        type=float,
+        default=DEFAULT_FL_DIFFERENTIAL_COMPENSATION_GAIN,
     )
     parser.add_argument("--holdout-random-count", type=int, default=64)
     parser.add_argument(
@@ -1845,7 +1945,8 @@ def main() -> None:
         fl_disturbance_bandwidth_hz=args.fl_disturbance_bandwidth_hz,
         unmatched_state_bandwidth_hz=args.unmatched_state_bandwidth_hz,
         compensation_cutoff_hz=args.compensation_cutoff_hz,
-        fl_compensation_gain=args.fl_compensation_gain,
+        fl_common_compensation_gain=args.fl_common_compensation_gain,
+        fl_differential_compensation_gain=args.fl_differential_compensation_gain,
         holdout_random_count=args.holdout_random_count,
     )
     lqr_result = compute_gain_schedule(step=args.step)
@@ -1855,8 +1956,10 @@ def main() -> None:
 
 
 __all__ = [
+    "COMPENSATION_FILTER_ORDER",
     "DEFAULT_COMPENSATION_CUTOFF_HZ",
-    "DEFAULT_FL_COMPENSATION_GAIN",
+    "DEFAULT_FL_COMMON_COMPENSATION_GAIN",
+    "DEFAULT_FL_DIFFERENTIAL_COMPENSATION_GAIN",
     "DEFAULT_FL_DISTURBANCE_BANDWIDTH_HZ",
     "DEFAULT_FL_STATE_BANDWIDTH_HZ",
     "DEFAULT_TOTAL_DEGREE",
