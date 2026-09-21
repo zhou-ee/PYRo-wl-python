@@ -20,13 +20,13 @@ from .core import config
 from .core.model import StaticLinearization, linearize_static_trim
 
 
-# Match the disturbance pole used by the deployed LESO.  RDOB uses a
-# trapezoidal update, so invert that discretization instead of interpreting
-# the LESO pole through a continuous-time exponential approximation.
-REFERENCE_LESO_DISTURBANCE_POLE = 0.992
+# Nominal auxiliary-state pole for the 1 ms trapezoidal RDOB update.  Invert
+# that discretization rather than using a continuous-time exponential
+# approximation, so regenerating the default preserves the requested pole.
+DEFAULT_RDOB_STEP_POLE = 0.992
 _DEFAULT_RATE_RAD_S = (
-    2.0 * (1.0 - REFERENCE_LESO_DISTURBANCE_POLE)
-    / (config.SAMPLE_TIME * (1.0 + REFERENCE_LESO_DISTURBANCE_POLE))
+    2.0 * (1.0 - DEFAULT_RDOB_STEP_POLE)
+    / (config.SAMPLE_TIME * (1.0 + DEFAULT_RDOB_STEP_POLE))
 )
 _DEFAULT_CHANNEL_BANDWIDTH_HZ = float(_DEFAULT_RATE_RAD_S / (2.0 * np.pi))
 # Keep the public default as six explicit channel entries.  The values match
@@ -39,10 +39,10 @@ DEFAULT_BANDWIDTH_HZ = (
     _DEFAULT_CHANNEL_BANDWIDTH_HZ,  # f_l1
     _DEFAULT_CHANNEL_BANDWIDTH_HZ,  # f_l2
 )
-REFERENCE_LESO_DISTURBANCE_LIMIT_RATIO = 0.1
+DEFAULT_DISTURBANCE_LIMIT_RATIO = 0.1
 DEFAULT_DISTURBANCE_LIMITS = tuple(
     float(value)
-    for value in REFERENCE_LESO_DISTURBANCE_LIMIT_RATIO * config.INPUT_UPPER_LIMITS
+    for value in DEFAULT_DISTURBANCE_LIMIT_RATIO * config.INPUT_UPPER_LIMITS
 )
 
 
@@ -60,9 +60,9 @@ def compute_rdob_node(
 ) -> RdobNode:
     """Use existing static mechanics; D0 defaults to zero (not identified).
 
-    The default gives all six RDOB channels the deployed LESO disturbance pole
-    at the nominal sample time.  All six channels are observed regardless of
-    downstream compensation selection.
+    The default gives all six RDOB channels ``DEFAULT_RDOB_STEP_POLE`` at the
+    nominal sample time.  All six channels are observed regardless of downstream
+    compensation selection.
     """
     for length in (l1, l2):
         if not np.isfinite(length):
@@ -246,7 +246,7 @@ def main(argv: list[str] | None = None) -> None:
                         help="maximum matched input-map relative Frobenius error; default 0.01 = 1%%")
     parser.add_argument("--sample-time", type=float, default=config.SAMPLE_TIME)
     parser.add_argument("--bandwidth-hz", type=float, nargs=6, default=DEFAULT_BANDWIDTH_HZ,
-                        metavar="HZ", help="Tw1 Tw2 Tp1 Tp2 FL1 FL2; default matches the deployed LESO disturbance pole")
+                        metavar="HZ", help="Tw1 Tw2 Tp1 Tp2 FL1 FL2; defaults produce the nominal RDOB step pole")
     parser.add_argument("--damping-diagonal", type=float, nargs=7, default=None,
                         metavar="D", help="optional diagonal D0 in generalized-coordinate order")
     parser.add_argument("--output-dir", type=Path, required=True)

@@ -13,7 +13,7 @@ from wheel_leg_lqr.control.rdob import (
     reconstruct_disturbance, step_rdob, trapezoidal_step_constants,
 )
 from wheel_leg_lqr.rdob import (
-    DEFAULT_BANDWIDTH_HZ, REFERENCE_LESO_DISTURBANCE_POLE, compute_rdob_node,
+    DEFAULT_BANDWIDTH_HZ, DEFAULT_RDOB_STEP_POLE, compute_rdob_node,
     export_rdob, main, rdob_diagnostics,
 )
 
@@ -36,11 +36,11 @@ def make_design(mechanics, dt=0.001):
                        rates_rad_s=np.arange(3., 9.), sample_time=dt)
 
 
-def test_default_rdob_poles_match_deployed_leso():
+def test_default_rdob_poles_match_nominal_step_pole():
     design = compute_rdob_node(0.28, 0.28).observer
     assert len(DEFAULT_BANDWIDTH_HZ) == 6
     np.testing.assert_allclose(
-        design.step_poles, REFERENCE_LESO_DISTURBANCE_POLE,
+        design.step_poles, DEFAULT_RDOB_STEP_POLE,
         rtol=0.0, atol=2e-16,
     )
 

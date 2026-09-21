@@ -1,4 +1,4 @@
-"""双轮腿机器人主机侧建模与 LQR 增益调度包。"""
+"""双轮腿机器人主机侧建模、LQR 调度与 RDOB 生成包。"""
 
 from __future__ import annotations
 
@@ -11,7 +11,6 @@ __all__ = [
     "artifacts",
     "control",
     "core",
-    "leso_schedule",
     "numeric_config",
     "numeric_model",
     "rdob",

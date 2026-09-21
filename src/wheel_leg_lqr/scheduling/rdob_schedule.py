@@ -271,10 +271,10 @@ def step_scheduled_rdob(
 ):
     """Advance with the old trim, limit d_hat, then rebase to the new trim.
 
-    The deployment-reference default uses the same limits as the firmware
-    LESO/RDOB comparison.  Pass ``disturbance_limits=None`` for the unsaturated
-    mathematical observer.  Omitting trim velocities preserves the static-trim
-    behavior of the original interface.
+    The deployment-reference default limits each disturbance channel to the
+    configured fraction of its actuator limit. Pass ``disturbance_limits=None``
+    for the unsaturated mathematical observer. Omitting trim velocities preserves
+    the static-trim behavior of the original interface.
     """
     previous, following = schedule.evaluate(*previous_lengths), schedule.evaluate(*next_lengths)
     old_trim_velocity = np.zeros(config.N_Q) if previous_trim_velocity is None else np.asarray(

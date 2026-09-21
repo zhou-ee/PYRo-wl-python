@@ -97,7 +97,7 @@ $$\hat d_{u,k+1}=z_{k+1}+\Gamma v_{k+1}.$$
 - 模型中的 `trim_total_input` 包含总支撑力。若获取的是主动电机折算腿力，应加当前气弹簧模型力后，再减总配平力。导出的 `trim_active_input` 仅作对照，不能将主动/总力混用。气弹簧模型残差会进入扰动估计。
 - 有当前测量时先用当前 `z` 重构扰动并计算控制。在下一次测量到来后，使用上一区间的实际输入调用 `step_rdob`，得到与新测量同一时刻的 `z` 和扰动。
 - 初次启动用 `z0 = initial_d - Gamma*v0`；若希望零扰动初始化，即 `z0=-Gamma*v0`。不能在非零速度下简单将 `z0` 清零。
-- 底层 `step_rdob` 没有默认泄漏、估计限幅或补偿滤波；部署参考接口 `step_scheduled_rdob` 默认使用与当前固件 LESO 相同的 `0.1×` 执行器上限，也可显式传 `disturbance_limits=None` 关闭。限幅在端点重基准化之前完成，始终维护 `z = d_hat - Gamma*(v-v0)` 的一致性。后续补偿可设置 Tw/Tp/FL 独立增益，不要把补偿增益乘入观测器动力学。
+- 底层 `step_rdob` 没有默认泄漏、估计限幅或补偿滤波；部署参考接口 `step_scheduled_rdob` 默认使用 `0.1×` 执行器上限，也可显式传 `disturbance_limits=None` 关闭。限幅在端点重基准化之前完成，始终维护 `z = d_hat - Gamma*(v-v0)` 的一致性。后续补偿可设置 Tw/Tp/FL 独立增益，不要把补偿增益乘入观测器动力学。
 
 若在线改变 $\Gamma$，连续推导会多出 $-\dot\Gamma v$；变化配平点也有坐标导数项。单点公式只适用于固定模型。二维调度步进采用第 6 节的分段固定模型和端点重基准化，不把新旧配平坐标直接混入一次固定模型更新。
 
@@ -107,7 +107,7 @@ $$\hat d_{u,k+1}=z_{k+1}+\Gamma v_{k+1}.$$
 python run_rdob.py --step 0.02 --fit-tolerance 0.005 --channel-tolerance 0.01 --sample-time 0.001 --output-dir data/generated/rdob
 ```
 
-安装项目后也可使用 `wheelleg-rdob`，参数相同。默认值按 RDOB 的梯形离散公式反算，使六路离散扰动极点均为 `0.992`，与当前下位机 LESO 的扰动极点相同；这只对齐扰动估计的名义收敛极点，不表示两种观测器的完整瞬态会一致。
+安装项目后也可使用 `wheelleg-rdob`，参数相同。默认值按 RDOB 的梯形离散公式反算，使六路名义离散扰动极点均为 `0.992`；该值只是初始带宽配置，仍需结合传感器噪声、执行器动态与实机数据整定。
 
 默认生成二维调度的 `rdob_schedule.npz`、`rdob_schedule.json`、`rdob_schedule.h`、`rdob_schedule_report.md`。JSON/NPZ 包含 Gamma 的三次全张量直接系数、Bq 的总阶三次直接系数以及全部训练与留出参数点。
 

@@ -9,7 +9,7 @@
 | `src/wheel_leg_lqr/rdob.py` | RDOB 上位机入口，默认 L1/L2 二维调度，可选单点诊断 |
 | `src/wheel_leg_lqr/scheduling/rdob_schedule.py` | RDOB 的 Gamma 三次全张量与 Bq 总阶三次直接拟合、float32 验证、六通道离散常量及纯数据 C++ 头文件导出 |
 | `docs/input_equivalent_rdob.md` | RDOB 数学推导、投影条件及运行时契约 |
-| `docs/rdob_design_and_implementation.md` | 参照 LESO 文档结构展开的 RDOB 专题：五个调度对象、完整推导、离散调度与 C++ 示例 |
+| `docs/rdob_design_and_implementation.md` | RDOB 专题：调度对象、完整推导、离散更新与 C++ 示例 |
 | `src/wheel_leg_lqr/control/saturation.py` | 执行器饱和仿真和验证 |
 | `src/wheel_leg_lqr/scheduling/leg_length_schedule.py` | 项目唯一的 `L1/L2` 张量积增益拟合与产物导出 |
 | `src/wheel_leg_lqr/scheduling/polynomial.py` | L1/L2 归一化张量积多项式基础运算 |
@@ -20,4 +20,4 @@
 | `docs/step_drop_simulation.md` | 0.18 m 单腿下台阶的可复现实验条件、结果与模型适用边界 |
 | `src/wheel_leg_lqr/artifacts/io.py` | 生成物写盘工具 |
 
-`src/wheel_leg_lqr/gain_schedule.py` 是正式公共入口；不再提供只基于腿长差值的调度模块，也不使用带有二维后缀的命名。
+LQR 调度入口为 `src/wheel_leg_lqr/gain_schedule.py`，RDOB 入口为 `src/wheel_leg_lqr/rdob.py`；两者共享 `core` 中的物理模型与 `control/lqr.py` 中的离散化和 LQR 求解。

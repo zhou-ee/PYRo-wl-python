@@ -1,25 +1,5 @@
-"""The project's L1/L2 gain-scheduling workflow."""
+"""Public L1/L2 scheduling APIs for LQR and RDOB."""
 
-from .leso_schedule import (
-    COMPENSATION_FILTER_ORDER,
-    DEFAULT_DISTURBANCE_LEAK_BANDWIDTH_HZ,
-    DEFAULT_DISTURBANCE_LIMIT_RATIO,
-    DEFAULT_FL_COMMON_COMPENSATION_GAIN,
-    DEFAULT_FL_DIFFERENTIAL_COMPENSATION_GAIN,
-    DEFAULT_FL_DISTURBANCE_BANDWIDTH_HZ,
-    DEFAULT_FL_STATE_BANDWIDTH_HZ,
-    DEFAULT_HIP_STATE_BANDWIDTH_HZ,
-    DEFAULT_TORQUE_DISTURBANCE_BANDWIDTH_HZ,
-    DEFAULT_TORQUE_STATE_BANDWIDTH_HZ,
-    DEFAULT_UNMATCHED_STATE_BANDWIDTH_HZ,
-    DEFAULT_WHEEL_STATE_BANDWIDTH_HZ,
-    LesoScheduleFit,
-    compute_leso_schedule,
-    render_combined_coef_header,
-    render_firmware_coefficients,
-    render_firmware_fit_block,
-    save_result as save_leso_result,
-)
 from .leg_length_schedule import (
     GainNode,
     GainScheduleFit,
@@ -28,36 +8,24 @@ from .leg_length_schedule import (
     evaluate_fitted_gain,
     save_result,
 )
-from .pod_chebyshev import (
-    SymmetricPodChebyshevSchedule,
-    fit_symmetric_pod_chebyshev,
+from .rdob_schedule import (
+    RdobSchedule,
+    compute_rdob_schedule,
+    export_rdob_schedule,
+    render_rdob_schedule_header,
+    step_scheduled_rdob,
 )
 
 __all__ = [
     "GainNode",
     "GainScheduleFit",
-    "COMPENSATION_FILTER_ORDER",
-    "DEFAULT_DISTURBANCE_LEAK_BANDWIDTH_HZ",
-    "DEFAULT_DISTURBANCE_LIMIT_RATIO",
-    "DEFAULT_FL_COMMON_COMPENSATION_GAIN",
-    "DEFAULT_FL_DIFFERENTIAL_COMPENSATION_GAIN",
-    "DEFAULT_FL_DISTURBANCE_BANDWIDTH_HZ",
-    "DEFAULT_FL_STATE_BANDWIDTH_HZ",
-    "DEFAULT_HIP_STATE_BANDWIDTH_HZ",
-    "DEFAULT_TORQUE_DISTURBANCE_BANDWIDTH_HZ",
-    "DEFAULT_TORQUE_STATE_BANDWIDTH_HZ",
-    "DEFAULT_UNMATCHED_STATE_BANDWIDTH_HZ",
-    "DEFAULT_WHEEL_STATE_BANDWIDTH_HZ",
-    "LesoScheduleFit",
-    "SymmetricPodChebyshevSchedule",
+    "RdobSchedule",
     "compute_gain_node",
     "compute_gain_schedule",
-    "compute_leso_schedule",
+    "compute_rdob_schedule",
     "evaluate_fitted_gain",
-    "fit_symmetric_pod_chebyshev",
-    "render_combined_coef_header",
-    "render_firmware_coefficients",
-    "render_firmware_fit_block",
-    "save_leso_result",
+    "export_rdob_schedule",
+    "render_rdob_schedule_header",
     "save_result",
+    "step_scheduled_rdob",
 ]

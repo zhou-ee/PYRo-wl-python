@@ -1,6 +1,6 @@
 # python-wl
 
-双轮腿机器人主机侧建模、LQR 增益调度与离线分析代码。该目录是从原项目整理出的独立可运行副本，保留 `wheel_leg_lqr` 的旧导入入口，同时把实现按职责拆分，便于测试、替换和扩展。
+双轮腿机器人主机侧建模、LQR 增益调度、RDOB 系数生成与离线分析代码。实现按职责拆分，便于测试、替换和扩展。
 
 ## 目录结构
 
@@ -8,8 +8,8 @@
 python-wl/
 ├─ src/wheel_leg_lqr/
 │  ├─ core/                 # 物理参数、状态维度、符号模型与静态线性化
-│  ├─ control/              # 离散化、LQR、可控性数值计算、饱和仿真
-│  ├─ scheduling/           # 唯一的 L1/L2 张量积增益调度和多项式拟合
+│  ├─ control/              # 离散化、LQR、RDOB 与饱和仿真
+│  ├─ scheduling/           # LQR/RDOB 的 L1/L2 调度和多项式拟合
 │  ├─ analysis/             # 符号能控性、带宽、QR 权重优化
 │  ├─ artifacts/            # 产物写盘的公共工具
 │  └─ *.py                  # 兼容门面，旧代码无需立即改导入路径
@@ -22,7 +22,7 @@ python-wl/
 依赖安装：
 
 ```powershell
-cd E:\Software\Agent\pack\python-wl
+cd E:\Software\Agent\pack\PYRo-wl-python
 python -m pip install -e .
 ```
 
@@ -69,7 +69,7 @@ wheelleg-schedule --exhaustive-validation --output-dir data/generated
 python run_rdob.py --step 0.02 --fit-tolerance 0.005 --channel-tolerance 0.01 --sample-time 0.001 --output-dir data/generated/rdob
 ```
 
-导出 `rdob_schedule.npz/json`、C++ 纯数据头文件 `rdob_schedule.h` 和验证报告。头文件不生成 `Coefficients` 或 `evaluate()`，只提供腿长范围、`Gamma/Bq` 拟合表及六通道 `rate/z pole/endpoint weight/input gain/velocity scale` 数组；即使当前六路相同也保持独立布局。默认 `D0=0`；六路默认离散极点均约为 `0.992`，与当前下位机 LESO 扰动极点相同（RDOB 梯形离散反算约 `1.278353 Hz`）。部署参考步进默认同样使用 LESO 的 `0.1×` 执行器上限，并在限幅后重基准化内部状态。运行时按上一区间系数更新并在端点重基准化辅助状态。冻结点稳定性检查不保证任意变腿长过程稳定。安装后可用同参数的 `wheelleg-rdob` 命令。
+导出 `rdob_schedule.npz/json`、C++ 纯数据头文件 `rdob_schedule.h` 和验证报告。头文件不生成 `Coefficients` 或 `evaluate()`，只提供腿长范围、`Gamma/Bq` 拟合表及六通道 `rate/z pole/endpoint weight/input gain/velocity scale` 数组；即使当前六路相同也保持独立布局。默认 `D0=0`，六路名义离散极点均约为 `0.992`，按 RDOB 梯形离散反算约为 `1.278353 Hz`。部署参考步进默认将扰动估计限制为对应执行器上限的 `0.1×`，并在限幅后重基准化内部状态。运行时按上一区间系数更新并在端点重基准化辅助状态。冻结点稳定性检查不保证任意变腿长过程稳定。安装后可用同参数的 `wheelleg-rdob` 命令。
 
 `Gamma` 使用三次全张量直接拟合，`Bq` 使用二维总阶三次直接拟合；`q0` 和总 `u0` 由既有 LQR 调度提供，不在 RDOB 中重复存储。默认矩阵拟合误差不超过 **0.5%**、匹配通道映射误差不超过 **1%**（相对 Frobenius 范数）。全零阻尼矩阵从 C++ 存储与求值中直接消去；常量离散极点和积分权重离线预计算。
 

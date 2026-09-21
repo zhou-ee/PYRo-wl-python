@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "wheel-leg-lqr"
 version = "0.1.0"
-description = "Runnable host-side LQR gain scheduling for the wheel-leg double-leg robot"
+description = "Host-side wheel-leg modeling, LQR scheduling, and RDOB generation"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

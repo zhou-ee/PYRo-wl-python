@@ -5,8 +5,7 @@
 > **基准控制器**：LQR 使用已有物理状态测量，RDOB 提供六路输入等效扰动估计。  
 > **计算周期**：当前默认 1000 Hz，$T_s=0.001\,\mathrm{s}$。  
 > **调度范围**：$L_1,L_2\in[0.18,0.38]\,\mathrm{m}$，平均腿长随两者变化。  
-> **对应版本**：`codex/input-equivalent-rdob` 分支，0.5% 矩阵与 1% 通道映射预算版本；记录日期 2026-09-15。  
-> **编写依据**：参照《LESO扩张状态观测器设计与实现》的章节组织；方程、维度、代码接口与数值结果以本项目 RDOB 实现为准。
+> **对应版本**：`RDOB` 分支，0.5% 矩阵与 1% 通道映射预算版本；记录日期 2026-09-21。
 
 ## 五个数学对象速查
 
@@ -34,27 +33,25 @@ $$
 
 ---
 
-## 一、从全阶 LESO 到六阶 RDOB
+## 一、六阶 RDOB 的观测目标
 
 ### 1.1 现有控制链需要观测什么
 
 设七个广义坐标及七个广义速度均可获得。LQR 已经使用这些状态信号进行反馈，额外需要的是执行器输入端的六路未知扰动。
 
-全阶 LESO 可以同时维护十四维物理状态估计和六维扰动估计，共二十维内部动态状态。即便其物理状态估计没有直接送入 LQR，它仍用于构造预测残差，因此在原 LESO 结构里有数学作用。
-
-RDOB 利用全状态可获得这一条件，重新构造仅含六个辅助状态的观测器。其核心动态状态为
+十四个物理状态已经由现有测量与融合链提供给 LQR，因此扰动观测器不再重复维护一套物理状态估计。RDOB 直接利用可测位置和速度，只维护六个辅助状态：
 
 $$z\in\mathbb R^6.$$
 
 十四个测量信号仍参与运算。上一时刻测量缓存、补偿滤波器和控制器状态的存储，应另外计算。
 
-| 项目 | 本项目的全阶输入等效 LESO | 本文 RDOB |
-| :--- | :--- | :--- |
-| 核心内部状态 | 物理状态估计与扰动估计 | 六维辅助变量 $z$ |
-| 状态信息来源 | 模型预测与测量校正 | 已有位置、速度测量 |
-| 扰动输出 | 从扩张状态中提取 | $\hat d_u=z+\Gamma v$ |
-| 主要整定量 | 状态极点与扰动极点等 | 六个扰动收敛速率 $\lambda_i$ |
-| 需要验证的重点 | 预测误差、噪声与补偿动态 | 速度测量质量、模型投影与补偿动态 |
+| 项目 | RDOB 设计选择 |
+| :--- | :--- |
+| 核心内部状态 | 六维辅助变量 $z$ |
+| 状态信息来源 | 已有位置、速度测量 |
+| 扰动输出 | $\hat d_u=z+\Gamma v$ |
+| 主要整定量 | 六个扰动收敛速率 $\lambda_i$ |
+| 需要验证的重点 | 速度测量质量、模型投影、输入时序与补偿动态 |
 
 减少观测器阶数并不自动保证更低噪声或更好的闭环鲁棒性。RDOB 的价值是让内部结构与“只估计输入等效扰动”的任务直接对应。
 
@@ -246,13 +243,13 @@ $$|e_i(t)|\le e^{-\lambda_i t}|e_i(0)|+
 
 $$\lambda_i=2\pi f_i,\qquad \tau_i=\frac1{\lambda_i}.$$
 
-当前默认值按 RDOB 的梯形离散公式反算，使 $T_s=1\,\mathrm{ms}$ 时六路离散极点都等于当前下位机 LESO 的扰动极点 $0.992$。表中的 95% 收敛时间对应理想连续一阶阶跃响应，由 $t_{95}=-\ln(0.05)/\lambda_i$ 计算，不是实车测量结果。
+当前默认值按 RDOB 的梯形离散公式反算，使 $T_s=1\,\mathrm{ms}$ 时六路名义离散极点都等于 $0.992$。表中的 95% 收敛时间对应理想连续一阶阶跃响应，由 $t_{95}=-\ln(0.05)/\lambda_i$ 计算，不是实车测量结果。
 
 | 通道 | $f_i$ | $\lambda_i$ | 时间常数 | 理想 95% 收敛时间 |
 | :--- | ---: | ---: | ---: | ---: |
 | 全部六路 | 1.278353 Hz | 8.032129 s⁻¹ | 124.5 ms | 372.9 ms |
 
-该带宽只对齐名义扰动极点，不要求 RDOB 与 LESO 的冲激响应或全部瞬态完全一致；仍需结合传感器与执行器动态整定。
+该带宽只定义名义扰动收敛速度，不保证实际闭环的冲激响应或全部瞬态；仍需结合传感器与执行器动态整定。
 
 ---
 
@@ -666,9 +663,8 @@ $$\Delta\hat d_u(s)=
 
 ## 参考文档与实现位置
 
-1. [LESO扩张状态观测器设计与实现](E:/Software/Obsidian/Pack/Lucky/控制/sdut_wl/LESO扩张状态观测器设计与实现.md)：章节组织参考，本文不沿用其中单腿六状态、两输入模型的维度与性能数据。
-2. [RDOB 连续设计与离散更新](E:/Software/Agent/pack/PYRo-wl-python/src/wheel_leg_lqr/control/rdob.py)：`design_rdob`、`rdob_derivative`、`initialize_rdob`、`step_rdob`。
-3. [L1/L2 调度与导出](E:/Software/Agent/pack/PYRo-wl-python/src/wheel_leg_lqr/scheduling/rdob_schedule.py)：`_snapshot`、`compute_rdob_schedule`、`step_scheduled_rdob`、`render_rdob_schedule_header`。
-4. [静态配平动力学](E:/Software/Agent/pack/PYRo-wl-python/src/wheel_leg_lqr/core/model.py)：`make_trim_geometry`、`linearize_static_trim`。
-5. [当前生成报告](E:/Software/Agent/pack/PYRo-wl-python/data/generated/rdob/rdob_schedule_report.md)：本页数值的来源；重新生成后应以新报告为准。
-6. Kim, K.-S., Rew, K.-H. *Reduced order disturbance observer for discrete-time linear systems*. Automatica, 49(4), 968–975, 2013. [DOI](https://doi.org/10.1016/j.automatica.2013.01.014)。作为降阶 DOB 的一般背景，本文具体公式按所给轮足模型推导。
+1. [RDOB 连续设计与离散更新](E:/Software/Agent/pack/PYRo-wl-python/src/wheel_leg_lqr/control/rdob.py)：`design_rdob`、`rdob_derivative`、`initialize_rdob`、`step_rdob`。
+2. [L1/L2 调度与导出](E:/Software/Agent/pack/PYRo-wl-python/src/wheel_leg_lqr/scheduling/rdob_schedule.py)：`_snapshot`、`compute_rdob_schedule`、`step_scheduled_rdob`、`render_rdob_schedule_header`。
+3. [静态配平动力学](E:/Software/Agent/pack/PYRo-wl-python/src/wheel_leg_lqr/core/model.py)：`make_trim_geometry`、`linearize_static_trim`。
+4. [当前生成报告](E:/Software/Agent/pack/PYRo-wl-python/data/generated/rdob/rdob_schedule_report.md)：本页数值的来源；重新生成后应以新报告为准。
+5. Kim, K.-S., Rew, K.-H. *Reduced order disturbance observer for discrete-time linear systems*. Automatica, 49(4), 968–975, 2013. [DOI](https://doi.org/10.1016/j.automatica.2013.01.014)。作为降阶 DOB 的一般背景，本文具体公式按所给轮足模型推导。
