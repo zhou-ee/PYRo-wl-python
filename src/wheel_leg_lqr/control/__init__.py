@@ -22,6 +22,15 @@ from .leso import (
     step_leso_split,
 )
 from .lqr import controllability_rank, discretize_state_space, solve_discrete_lqr
+from .rdob import (
+    RdobDesign,
+    design_rdob,
+    initialize_rdob,
+    rdob_derivative,
+    reconstruct_disturbance,
+    step_rdob,
+    trapezoidal_step_constants,
+)
 from .saturation import (
     SaturationValidation,
     default_initial_errors,
@@ -31,6 +40,13 @@ from .saturation import (
 )
 
 __all__ = [
+    "RdobDesign",
+    "design_rdob",
+    "initialize_rdob",
+    "rdob_derivative",
+    "reconstruct_disturbance",
+    "step_rdob",
+    "trapezoidal_step_constants",
     "DEFAULT_DISTURBANCE_LEAK_BANDWIDTH_HZ",
     "DEFAULT_DISTURBANCE_POLES",
     "DEFAULT_DISTURBANCE_RETENTION_POLE",

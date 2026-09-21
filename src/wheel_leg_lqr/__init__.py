@@ -14,6 +14,7 @@ __all__ = [
     "leso_schedule",
     "numeric_config",
     "numeric_model",
+    "rdob",
     "resolve_output_dir",
     "scheduling",
 ]

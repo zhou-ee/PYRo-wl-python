@@ -23,6 +23,8 @@ wheelleg-schedule = "wheel_leg_lqr.gain_schedule:main"
 wheelleg-controllability = "wheel_leg_lqr.symbolic_controllability:main"
 wheelleg-bandwidth = "wheel_leg_lqr.analyze_bandwidth:main"
 wheelleg-optimize-qr = "wheel_leg_lqr.optimize_qr:main"
+wheelleg-rdob = "wheel_leg_lqr.rdob:main"
+wheelleg-step-drop = "wheel_leg_lqr.analysis.step_drop:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
