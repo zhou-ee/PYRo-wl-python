@@ -43,7 +43,7 @@ class DoubleLegParameters:
     wheel_rolling_inertia: float = 0.000596
     wheel_radius: float = 0.06
     leg_mass: float = 1.232
-    body_mass: float = 18.9255  # 12.0
+    body_mass: float = 12.0 #18.9255  # 12.0
     hip_half_track: float = 0.158  # 0.147
     wheel_half_track: float = 0.20025
     body_com_from_hip: np.ndarray = field(
@@ -241,10 +241,10 @@ Q_DIAG = np.array(
         8.0,  # psi, dpsi   (航向偏航与角速度：保持平稳巡航)
         400.0,
         25.0,  # theta, dtheta (机体俯仰与角速度：大幅提高阻尼，死死按住抬头后仰)
-        1200.0,
+        600.0,
         25.0,  # phi, dphi   (横滚与侧倾角速度：维持横坡高抗倾刚度)
-        280.0,
-        10.0,  # L_bar, dL_bar (平均腿长与速度：抑制腿长漂移)
+        3000.0,
+        12.0,  # L_bar, dL_bar (平均腿长与速度：抑制腿长漂移)
         120.0,
         6.0,  # beta_1, dbeta_1 (左腿摆角与速度：适度软化，降低髋关节冲击)
         120.0,
