@@ -8,6 +8,7 @@ __version__ = "0.1.0"
 
 __all__ = [
     "analysis",
+    "airborne_lqr",
     "artifacts",
     "control",
     "core",

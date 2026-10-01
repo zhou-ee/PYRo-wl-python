@@ -43,7 +43,7 @@ class DoubleLegParameters:
     wheel_rolling_inertia: float = 0.000596
     wheel_radius: float = 0.06
     leg_mass: float = 1.232
-    body_mass: float = 12.0 #18.9255  # 12.0
+    body_mass: float = 18.9255  # 12.0
     hip_half_track: float = 0.158  # 0.147
     wheel_half_track: float = 0.20025
     body_com_from_hip: np.ndarray = field(

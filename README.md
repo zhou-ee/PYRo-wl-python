@@ -7,7 +7,8 @@
 ```text
 python-wl/
 ├─ src/wheel_leg_lqr/
-│  ├─ core/                 # 物理参数、状态维度、符号模型与静态线性化
+│  ├─ core/                 # 地面十四状态物理参数、符号模型与静态线性化
+│  ├─ airborne/             # 独立的无接触物理参数、动力学、LQR 与拟合
 │  ├─ control/              # 离散化、LQR、RDOB 与饱和仿真
 │  ├─ scheduling/           # LQR/RDOB 的 L1/L2 调度和多项式拟合
 │  ├─ analysis/             # 符号能控性、带宽、QR 权重优化
@@ -34,6 +35,8 @@ wheelleg-controllability --output-dir data/generated
 wheelleg-bandwidth --height 0.24
 wheelleg-optimize-qr --max-iter 400
 wheelleg-step-drop --step-height 0.18 --down-leg 0 --horizon 1.0
+wheelleg-airborne-lqr --step 0.01 --output-dir data/generated/airborne_lqr
+python run_airborne_fl_pitch.py --body-com-x 0.03 --fl1 100 --fl2 100
 python -m data_process.fit_leg_com
 ```
 
@@ -52,12 +55,18 @@ wheelleg-schedule --exhaustive-validation --output-dir data/generated
 
 ## 设计约定
 
-- `core.config` 是物理常量、状态/输入顺序和权重矩阵的唯一来源。
-- `core.model` 只负责几何、质量矩阵、重力、输入映射和静态线性化。
+- `core.config` 管理地面十四状态模型；`airborne.config` 独立管理腾空物理参数和 Q/R 权重，`airborne.model` 定义六状态顺序。
+- `core.model` 负责地面模型；`airborne.model` 从自由悬浮动能独立建立无接触小模型，不读取地面模型矩阵或配平结果。
 - 气弹簧由下位机按当前腿长实时抵消，因此不进入 `A/B/K`；调度器只把导出的主动腿力前馈改为 `FL_U0=F_L,total-F_gas(L)`。
 - `control` 提供不依赖调度策略的通用控制运算。
 - `scheduling` 只组织 L1/L2 配平点扫描、张量积拟合和验证；文件格式由调度模块调用 `artifacts.io` 完成。
 - 生成物必须写到显式 `--output-dir`，不要覆盖源码或参考数据。
+
+## 腾空双髋小模型 LQR
+
+腾空阶段使用仅有 `T_p1/T_p2` 两路输入、`beta_1/beta_2/theta` 三角度（含角速度）的六状态模型。运行 `python run_airborne_lqr.py --step 0.01 --output-dir data/generated/airborne_lqr` 生成独立的二维腿长拟合头文件。腾空模型拥有独立的物理参数和 Q/R，计算与拟合不导入地面十四状态 LQR；`--q-diag` 可调节腿角与 pitch 的优先级。动力学推导、十四状态索引、调权示例、部署方法与角动量约束见 [06 腾空双髋小模型 LQR](docs/06_airborne_lqr.md)。
+
+若需评估腾空时伸腿力对 pitch 的影响，可运行 `python run_airborne_fl_pitch.py --body-com-x 0.03 --fl1 100 --fl2 100`。该分析单独启用腿长自由度，输出机体力矩臂和整机无接触瞬时角加速度系数；双髋 LQR 的输入仍只有两路 `T_p`。公式和标称数值见同一份 06 文档。
 
 ## 六阶输入等效 RDOB
 

@@ -25,6 +25,8 @@ wheelleg-bandwidth = "wheel_leg_lqr.analyze_bandwidth:main"
 wheelleg-optimize-qr = "wheel_leg_lqr.optimize_qr:main"
 wheelleg-rdob = "wheel_leg_lqr.rdob:main"
 wheelleg-step-drop = "wheel_leg_lqr.analysis.step_drop:main"
+wheelleg-airborne-lqr = "wheel_leg_lqr.airborne_lqr:main"
+wheelleg-airborne-fl-pitch = "wheel_leg_lqr.airborne.fl_pitch:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
