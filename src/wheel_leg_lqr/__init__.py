@@ -14,6 +14,7 @@ __all__ = [
     "core",
     "numeric_config",
     "numeric_model",
+    "model_acceleration",
     "rdob",
     "resolve_output_dir",
     "scheduling",

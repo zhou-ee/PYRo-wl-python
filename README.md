@@ -10,7 +10,7 @@ python-wl/
 │  ├─ core/                 # 地面十四状态物理参数、符号模型与静态线性化
 │  ├─ airborne/             # 独立的无接触物理参数、动力学、LQR 与拟合
 │  ├─ control/              # 离散化、LQR、RDOB 与饱和仿真
-│  ├─ scheduling/           # LQR/RDOB 的 L1/L2 调度和多项式拟合
+│  ├─ scheduling/           # LQR/RDOB/模型加速度的 L1/L2 调度和多项式拟合
 │  ├─ analysis/             # 符号能控性、带宽、QR 权重优化
 │  ├─ artifacts/            # 产物写盘的公共工具
 │  └─ *.py                  # 兼容门面，旧代码无需立即改导入路径
@@ -59,7 +59,7 @@ wheelleg-schedule --exhaustive-validation --output-dir data/generated
 - `core.model` 负责地面模型；`airborne.model` 从自由悬浮动能独立建立无接触小模型，不读取地面模型矩阵或配平结果。
 - 气弹簧由下位机按当前腿长实时抵消，因此不进入 `A/B/K`；调度器只把导出的主动腿力前馈改为 `FL_U0=F_L,total-F_gas(L)`。
 - `control` 提供不依赖调度策略的通用控制运算。
-- `scheduling` 只组织 L1/L2 配平点扫描、张量积拟合和验证；文件格式由调度模块调用 `artifacts.io` 完成。
+- `scheduling` 只组织 L1/L2 配平点扫描、多项式拟合和验证；文件格式由调度模块调用 `artifacts.io` 完成。
 - 生成物必须写到显式 `--output-dir`，不要覆盖源码或参考数据。
 
 ## 腾空双髋小模型 LQR
@@ -83,6 +83,16 @@ python run_rdob.py --step 0.02 --fit-tolerance 0.005 --channel-tolerance 0.01 --
 `Gamma` 使用三次全张量直接拟合，`Bq` 使用二维总阶三次直接拟合；`q0` 和总 `u0` 由既有 LQR 调度提供，不在 RDOB 中重复存储。默认矩阵拟合误差不超过 **0.5%**、匹配通道映射误差不超过 **1%**（相对 Frobenius 范数）。全零阻尼矩阵从 C++ 存储与求值中直接消去；常量离散极点和积分权重离线预计算。
 
 保留单点诊断：`python run_rdob.py --mode node --l1 0.24 --l2 0.32 --output-dir data/generated/rdob_node`。单点文件名与调度文件名不同，C++ 调度应包含 `rdob_schedule.h`。
+
+## 前向模型加速度
+
+复用地面模型的 `D0=0` 静态线性化，提取前向加速度行的 4 个状态系数（θ、φ、β1、β2）和 6 个输入系数。实测腿长连续调度使平均腿长偏差为零，因此删除该状态项。10 个通道均按 L1/L2 做**总阶不超过三次**的 10 项拟合，共 100 个 float32（400 字节），不采用三次全张量。
+
+```powershell
+python run_model_acceleration.py --output-dir data/generated/model_acceleration
+```
+
+生成纯数据 C++ 头文件、NPZ 工作点数据、JSON 诊断及误差报告；包括原始模型/float32 镜像、加密网格和随机独立验证。默认最大误差硬门限为 2%，RMS 0.5% 为明确报告的建议目标，超出时不会自动升阶。标量计算、工作点及总输入约定见 [前向模型加速度说明](docs/model_acceleration.md)。安装后可用 `wheelleg-model-acceleration`。
 
 ## 测试
 
