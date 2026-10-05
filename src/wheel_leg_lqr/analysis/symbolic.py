@@ -1,22 +1,9 @@
-"""符号能控性分析：为 14 维双轮腿模型构造二阶能控性证书。
-
-Symbolic controllability analysis for the 14-state double-leg model.  The
-mechanics module is intentionally not duplicated here: this file accepts the
-linearized second-order matrices ``M, D, K, S`` and constructs the first-order
-state-space pair used by the controllability tests.
-"""
-
 from __future__ import annotations
-
-import argparse
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-
 import sympy as sp
-
-from .. import resolve_output_dir
-from ..core.config import N_Q, N_U
+from ..models.ground.config import N_Q, N_U
 
 
 @dataclass(frozen=True)
@@ -218,48 +205,3 @@ def generic_witness() -> dict[str, Any]:
 def _write_matrix(path: Path, matrix: sp.MatrixBase) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(str(matrix), encoding="utf-8")
-
-
-def main() -> None:
-    """运行符号结构能控性检查，并将矩阵转储到 --output-dir。
-
-    Run the symbolic structural check and dump the nominal input matrix and the
-    controllability matrix into ``--output-dir`` (default ``data/generated``).
-    """
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--output-dir",
-        default="data/generated",
-        help="Directory for the dumped matrices (default: data/generated).",
-    )
-    args = parser.parse_args()
-    output_dir = resolve_output_dir(args.output_dir)
-
-    result = generic_witness()
-    print(
-        f"symbolic S shape={result['symbolic_input_matrix'].shape}, "
-        f"rank={result['symbolic_input_rank']}"
-    )
-    print(
-        "C shape="
-        f"{result['controllability_matrix'].shape}, "
-        f"generic witness rank={result['controllability_rank']}"
-    )
-    print("Full rank 14 means the chosen generic mechanical witness is controllable.")
-    print(
-        "This is a structural witness, not the final robot result; replace M, D, K, S "
-        "with each measured trim point."
-    )
-
-    _write_matrix(
-        output_dir / "nominal_input_matrix.txt",
-        result["symbolic_input_matrix"],
-    )
-    _write_matrix(
-        output_dir / "generic_controllability_matrix.txt",
-        result["controllability_matrix"],
-    )
-
-
-if __name__ == "__main__":
-    main()

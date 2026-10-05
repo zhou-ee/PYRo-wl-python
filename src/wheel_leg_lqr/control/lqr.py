@@ -6,10 +6,8 @@ import control
 import numpy as np
 from scipy.signal import cont2discrete
 
-from ..core import config
 
-
-def discretize_state_space(A: np.ndarray, B: np.ndarray, *, sample_time: float = config.SAMPLE_TIME) -> tuple[np.ndarray, np.ndarray]:
+def discretize_state_space(A: np.ndarray, B: np.ndarray, *, sample_time: float) -> tuple[np.ndarray, np.ndarray]:
     """Discretize a continuous state-space pair using zero-order hold."""
     A = np.asarray(A, dtype=float)
     B = np.asarray(B, dtype=float)
@@ -30,10 +28,9 @@ def controllability_rank(A: np.ndarray, B: np.ndarray) -> int:
     return int(np.linalg.matrix_rank(np.asarray(control.ctrb(A, B), dtype=float)))
 
 
-def solve_discrete_lqr(Ad: np.ndarray, Bd: np.ndarray, Q: np.ndarray | None = None, R: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def solve_discrete_lqr(Ad: np.ndarray, Bd: np.ndarray, Q: np.ndarray, R: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Solve the configured discrete LQR problem and normalize outputs."""
-    Q = config.make_q() if Q is None else np.asarray(Q, dtype=float)
-    R = config.make_r() if R is None else np.asarray(R, dtype=float)
+    Q = np.asarray(Q, dtype=float)
+    R = np.asarray(R, dtype=float)
     gain, cost, poles = control.dlqr(Ad, Bd, Q, R)
     return np.asarray(gain, dtype=float), np.asarray(cost, dtype=float), np.asarray(poles)
-

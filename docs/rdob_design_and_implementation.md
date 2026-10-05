@@ -1,10 +1,10 @@
 # 轮足机器人六阶输入等效降阶扰动观测器（RDOB）设计与实现专题文档
 
-> **文档定位**：十四状态、六输入轮足机器人控制系统的扰动观测与补偿数学说明。  
-> **核心算法**：输入等效 RDOB + 梯形离散更新 + Gamma 三次全张量与 Bq 总阶三次直接调度。  
-> **基准控制器**：LQR 使用已有物理状态测量，RDOB 提供六路输入等效扰动估计。  
-> **计算周期**：当前默认 1000 Hz，$T_s=0.001\,\mathrm{s}$。  
-> **调度范围**：$L_1,L_2\in[0.18,0.38]\,\mathrm{m}$，平均腿长随两者变化。  
+> **文档定位**：十四状态、六输入轮足机器人控制系统的扰动观测与补偿数学说明。
+> **核心算法**：输入等效 RDOB + 梯形离散更新 + Gamma 三次全张量与 Bq 总阶三次直接调度。
+> **基准控制器**：LQR 使用已有物理状态测量，RDOB 提供六路输入等效扰动估计。
+> **计算周期**：当前默认 1000 Hz，$T_s=0.001\,\mathrm{s}$。
+> **调度范围**：$L_1,L_2\in[0.18,0.38]\,\mathrm{m}$，平均腿长随两者变化。
 > **对应版本**：`RDOB` 分支，0.5% 矩阵与 1% 通道映射预算版本；记录日期 2026-09-21。
 
 ## 五个数学对象速查
@@ -591,7 +591,7 @@ inline void advance_interval(
 ### 7.4 上位机生成命令与文件
 
 ```powershell
-python run_rdob.py --step 0.02 --fit-tolerance 0.005 --channel-tolerance 0.01 --output-dir data/generated/rdob
+python scripts/run_rdob.py --step 0.02 --fit-tolerance 0.005 --channel-tolerance 0.01 --output-dir outputs/rdob
 ```
 
 Gamma 固定使用三次全张量、Bq 固定使用总阶三次；单点诊断使用 `--mode node --l1 ... --l2 ...`。
@@ -663,8 +663,8 @@ $$\Delta\hat d_u(s)=
 
 ## 参考文档与实现位置
 
-1. [RDOB 连续设计与离散更新](E:/Software/Agent/pack/PYRo-wl-python/src/wheel_leg_lqr/control/rdob.py)：`design_rdob`、`rdob_derivative`、`initialize_rdob`、`step_rdob`。
-2. [L1/L2 调度与导出](E:/Software/Agent/pack/PYRo-wl-python/src/wheel_leg_lqr/scheduling/rdob_schedule.py)：`_snapshot`、`compute_rdob_schedule`、`step_scheduled_rdob`、`render_rdob_schedule_header`。
-3. [静态配平动力学](E:/Software/Agent/pack/PYRo-wl-python/src/wheel_leg_lqr/core/model.py)：`make_trim_geometry`、`linearize_static_trim`。
-4. [当前生成报告](E:/Software/Agent/pack/PYRo-wl-python/data/generated/rdob/rdob_schedule_report.md)：本页数值的来源；重新生成后应以新报告为准。
+1. [RDOB 连续设计与离散更新](E:/Software/Develop/RM/Wheel_leg/PYRo-wl-python/src/wheel_leg_lqr/control/rdob.py)：`design_rdob`、`rdob_derivative`、`initialize_rdob`、`step_rdob`。
+2. [L1/L2 调度与导出](E:/Software/Develop/RM/Wheel_leg/PYRo-wl-python/src/wheel_leg_lqr/scheduling/rdob.py)：`_snapshot`、`compute_rdob_schedule`、`step_scheduled_rdob`、`render_rdob_schedule_header`。
+3. [静态配平动力学](E:/Software/Develop/RM/Wheel_leg/PYRo-wl-python/src/wheel_leg_lqr/models/ground/model.py)：`make_trim_geometry`、`linearize_static_trim`。
+4. [当前生成报告](E:/Software/Develop/RM/Wheel_leg/PYRo-wl-python/outputs/rdob/rdob_schedule_report.md)：本页数值的来源；重新生成后应以新报告为准。
 5. Kim, K.-S., Rew, K.-H. *Reduced order disturbance observer for discrete-time linear systems*. Automatica, 49(4), 968–975, 2013. [DOI](https://doi.org/10.1016/j.automatica.2013.01.014)。作为降阶 DOB 的一般背景，本文具体公式按所给轮足模型推导。

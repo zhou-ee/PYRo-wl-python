@@ -14,7 +14,7 @@
 
 ## 无接触动力学
 
-本模型的物理参数在 `airborne/config.py` 独立保存。初值来自当前 CAD/整机参数集，包含机体质量和俯仰惯量、轮/腿质量、机体和腿质心拟合；代码不导入地面十四状态模型的配置、质量矩阵、重力项、配平结果或 `A/B/K`。腿的局部俯仰惯量采用杆件惯量与 CAD 质心偏移组成的估计。两腿长度在一个冻结调度点视为常量。把髋中心的自由水平、竖直平移加入动能，再消去自由平移，得到三角度惯量：
+本模型的物理参数统一维护在包根 `config.py`，与地面、接触模型共享。初值来自当前 CAD/整机参数集，包含机体质量和俯仰惯量、轮/腿质量、机体和腿质心拟合；代码不导入地面十四状态模型的配置、质量矩阵、重力项、配平结果或 `A/B/K`。腿的局部俯仰惯量采用杆件惯量与 CAD 质心偏移组成的估计。两腿长度在一个冻结调度点视为常量。把髋中心的自由水平、竖直平移加入动能，再消去自由平移，得到三角度惯量：
 
 \[
 M_a=M_{rr}-M_{rt}M_{tt}^{-1}M_{tr},\qquad
@@ -49,7 +49,7 @@ G=\begin{bmatrix}1&0\\0&1\\1&1\end{bmatrix}.
 \begin{bmatrix}F_{L1}\\F_{L2}\end{bmatrix}.
 \]
 
-在 `L1=L2=0.28 m`、`beta1=beta2=theta=0`、机体质心向前 `c_x=0.03 m`、向上 `c_z=0.032 m` 时：
+在机体质量 `18.9255 kg`、`L1=L2=0.28 m`、`beta1=beta2=theta=0`、机体质心向前 `c_x=0.03 m`、向上 `c_z=0.032 m` 时：
 
 | 量 | `F_L1` 单路每 1 N | 两路各 100 N |
 |---|---:|---:|
@@ -62,7 +62,7 @@ G=\begin{bmatrix}1&0\\0&1\\1&1\end{bmatrix}.
 复现计算：
 
 ```powershell
-python run_airborne_fl_pitch.py --body-com-x 0.03 --l1 0.28 --l2 0.28 --fl1 100 --fl2 100
+python scripts/run_airborne_fl_pitch.py --body-com-x 0.03 --l1 0.28 --l2 0.28 --fl1 100 --fl2 100
 ```
 
 此结果是当前姿态和腿长处的**瞬时**线性输入映射，不代表 100 N 可持续施加，也不包含电机电流、腿长行程、气弹簧或接触约束。要求某个持续时间内的 pitch 变化时，还需给出 `F_L(t)`、腿长控制及行程限制并积分变参数动力学。
@@ -71,7 +71,7 @@ python run_airborne_fl_pitch.py --body-com-x 0.03 --l1 0.28 --l2 0.28 --fl1 100 
 
 两路内力矩不能任意独立保持三个绝对角度。整体转动方向 `v=[-1,-1,1]^T` 满足 `v^T G=0`，总俯仰角动量 `v^T M_a \dot y` 守恒。六状态系统可控秩为 4；完整离散闭环始终有两个单位圆上的整体角度/角速度极点。这个限制不能通过调大 Q 或直接对六状态调用 LQR 消除。
 
-可控髋部形状为 `r=[theta+beta_1, theta+beta_2]^T`。程序用质量矩阵求形状到物理角度的映射 `R_s`，满足 `G^T R_s=I` 与 `v^T M_a R_s=0`，随后在四状态 `r_1, dr_1, r_2, dr_2` 上做离散 LQR。腾空权重与地面十四状态权重独立，当前 `Q_DIAG=[1200,6,1200,6,400,25]`（六状态顺序见上表），`R_DIAG=[0.1,0.1]`。它们定义在 `airborne/config.py`，也可从命令行覆盖。
+可控髋部形状为 `r=[theta+beta_1, theta+beta_2]^T`。程序用质量矩阵求形状到物理角度的映射 `R_s`，满足 `G^T R_s=I` 与 `v^T M_a R_s=0`，随后在四状态 `r_1, dr_1, r_2, dr_2` 上做离散 LQR。腾空权重与地面十四状态权重独立，当前 `Q_DIAG=[1200,6,1200,6,400,25]`（六状态顺序见上表），`R_DIAG=[0.1,0.1]`。它们定义在 `models/airborne/config.py`，也可从命令行覆盖。
 
 回投到六维物理状态时，采用 Q 加权的可达投影：`H=(R_s^T Q_angle R_s)^(-1)R_s^T Q_angle`，`K_6=K_4 diag(H,H)`（按交错状态排列）。这样在角动量约束下优先减小加权角度误差，包含 pitch 反馈。若腾空时已有非零总俯仰角动量，或目标三角度与当前守恒量不相容，三个绝对角度无法同时收敛到目标；控制器只稳定四个可控形状模态。长时间腾空时还要考虑腿角行程及力矩饱和。
 
@@ -94,16 +94,16 @@ python run_airborne_fl_pitch.py --body-com-x 0.03 --l1 0.28 --l2 0.28 --fl1 100 
 从项目根目录运行：
 
 ```powershell
-python run_airborne_lqr.py --step 0.01 --output-dir data/generated/airborne_lqr
+python scripts/run_airborne_lqr.py --step 0.01 --output-dir outputs/airborne_lqr
 ```
 
 例如更偏向 pitch，可在不修改地面 LQR 权重的情况下运行：
 
 ```powershell
-python run_airborne_lqr.py --step 0.01 --q-diag 120 6 120 6 4000 25 --output-dir data/generated/airborne_lqr_pitch
+python scripts/run_airborne_lqr.py --step 0.01 --q-diag 120 6 120 6 4000 25 --output-dir outputs/airborne_lqr_pitch
 ```
 
-`--q-diag` 按六状态顺序接收六个正数，也可用 `--r-diag RTP1 RTP2` 覆盖两个力矩惩罚。每次改权重都要重新计算并导出系数；JSON/NPZ/头文件均记录所用的 Q/R 对角线。腾空物理参数若变更，只需更新 `airborne/config.py` 并重生成；更改地面 LQR 配置不会改变腾空增益。
+`--q-diag` 按六状态顺序接收六个正数，也可用 `--r-diag RTP1 RTP2` 覆盖两个力矩惩罚。每次改权重都要重新计算并导出系数；JSON/NPZ/头文件均记录所用的 Q/R 对角线。机体物理参数若变更，更新包根 `config.py` 并重新生成地面、腾空及 RDOB 产物；更改地面 Q/R 不会改变腾空增益。
 
 安装包后可用 `wheelleg-airborne-lqr`。默认在 `L1,L2∈[0.18,0.38] m` 的 21×21 网格求增益，按两腿长度各三次的张量积多项式拟合。归一化坐标是 `lambda_i=clamp((Li-0.28)/0.10,-1,1)`；数据按 `C[input][state][p][q]` 升幂储存。生成目录内有：
 

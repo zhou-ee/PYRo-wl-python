@@ -1,107 +1,84 @@
-# python-wl
+# PYRo-wl-python
 
-双轮腿机器人主机侧建模、LQR 增益调度、RDOB 系数生成与离线分析代码。实现按职责拆分，便于测试、替换和扩展。
+双轮腿机器人离线建模、地面/腾空 LQR 调度、六通道输入等效 RDOB 与分析工具。
 
-## 目录结构
+工作区：`E:\Software\Develop\RM\Wheel_leg\PYRo-wl-python`。原工作区保留在 `E:\Software\Agent\pack\PYRo-wl-python`。
 
-```text
-python-wl/
-├─ src/wheel_leg_lqr/
-│  ├─ core/                 # 地面十四状态物理参数、符号模型与静态线性化
-│  ├─ airborne/             # 独立的无接触物理参数、动力学、LQR 与拟合
-│  ├─ control/              # 离散化、LQR、RDOB 与饱和仿真
-│  ├─ scheduling/           # LQR/RDOB/模型加速度的 L1/L2 调度和多项式拟合
-│  ├─ analysis/             # 符号能控性、带宽、QR 权重优化
-│  ├─ artifacts/            # 产物写盘的公共工具
-│  └─ *.py                  # 兼容门面，旧代码无需立即改导入路径
-├─ data_process/            # CAD 质心数据拟合
-├─ data/generated/          # L1/L2 调度与符号分析生成物
-├─ tests/                   # 单元与数值回归测试
-└─ run_*.py                 # Windows 双击/命令行启动脚本
-```
-
-依赖安装：
+## 安装与运行
 
 ```powershell
-cd E:\Software\Agent\pack\PYRo-wl-python
-python -m pip install -e .
-```
+cd E:\Software\Develop\RM\Wheel_leg\PYRo-wl-python
+python -m pip install -e ".[test]"
+# 需要 CAD Excel 拟合时
+python -m pip install -e ".[cad]"
 
-常用命令：
-
-```powershell
-wheelleg-schedule --step 0.02 --output-dir data/generated
-wheelleg-controllability --output-dir data/generated
+wheelleg-schedule --step 0.02
+wheelleg-airborne-lqr --step 0.02
+wheelleg-rdob --step 0.02
+wheelleg-rdob --mode node --l1 0.24 --l2 0.32
+wheelleg-controllability
 wheelleg-bandwidth --height 0.24
 wheelleg-optimize-qr --max-iter 400
-wheelleg-step-drop --step-height 0.18 --down-leg 0 --horizon 1.0
-wheelleg-airborne-lqr --step 0.01 --output-dir data/generated/airborne_lqr
-python run_airborne_fl_pitch.py --body-com-x 0.03 --fl1 100 --fl2 100
-python -m data_process.fit_leg_com
+wheelleg-step-drop --step-height 0.18 --horizon 1.0
+wheelleg-airborne-fl-pitch --body-com-x 0.03 --fl1 100 --fl2 100
+wheelleg-fit-leg-com
 ```
 
-未安装时可使用：
+未安装时可以运行 `python scripts/run_gain_schedule.py --step 0.02` 等启动器；也可设置 `$env:PYTHONPATH="src"` 后运行 `python -m wheel_leg_lqr.cli.ground_lqr`。
 
-```powershell
-$env:PYTHONPATH = "src"
-python -m wheel_leg_lqr.gain_schedule --help
-```
+## 结构与组件说明
 
-默认在 L1/L2 网格上均匀选取 5×5、共 25 个代表节点执行耗时较高的 5 秒饱和恢复仿真；所有节点仍会执行 LQR、拟合误差和闭环极点稳定性检查。发布前需要逐节点饱和验证时使用：
+每个组件目录都有 README，介绍职责、配置、实际接口、示例和依赖边界。
 
-```powershell
-wheelleg-schedule --exhaustive-validation --output-dir data/generated
-```
+| 组件 | 职责 |
+|---|---|
+| [统一配置与包入口](src/wheel_leg_lqr/README.md) | 整机质量、惯量、几何、质心曲线、被动机构与执行器参数 |
+| [物理模型](src/wheel_leg_lqr/models/README.md) | 共享物理数据，独立建立各接触模式的方程 |
+| [地面模型](src/wheel_leg_lqr/models/ground/README.md) | 七坐标、十四状态、六输入，配平与地面 Q/R |
+| [腾空模型](src/wheel_leg_lqr/models/airborne/README.md) | 六状态、双髋输入、四维可控形状空间 |
+| [接触模型](src/wheel_leg_lqr/models/contact/README.md) | 九坐标释放、地面碰撞和机械限位 |
+| [通用控制](src/wheel_leg_lqr/control/README.md) | 显式 Q/R、采样时间与任意维数的 LQR/RDOB |
+| [腿长调度](src/wheel_leg_lqr/scheduling/README.md) | 网格、拟合、float32 与闭环验证 |
+| [仿真](src/wheel_leg_lqr/simulation/README.md) | 饱和恢复和单腿下台阶 |
+| [分析](src/wheel_leg_lqr/analysis/README.md) | 能控性、带宽、QR 优化、腾空腿力影响 |
+| [CAD 标定](src/wheel_leg_lqr/calibration/README.md) | 原始 Excel 质心曲线拟合 |
+| [导出](src/wheel_leg_lqr/artifacts/README.md) | C++、NPZ、JSON、参数指纹与输出路径 |
+| [命令行](src/wheel_leg_lqr/cli/README.md) | 参数解析、流程组装与结果展示 |
+| [启动脚本](scripts/README.md) | Windows 未安装运行 |
+| [参考数据](data/reference/README.md) | CAD 输入原样保留 |
+| [测试](tests/README.md) | 物理、控制、调度、导出与依赖回归 |
+| [专题文档](docs/README.md) | 推导、固件契约和迁移结果 |
 
-## 设计约定
+## 配置约定
 
-- `core.config` 管理地面十四状态模型；`airborne.config` 独立管理腾空物理参数和 Q/R 权重，`airborne.model` 定义六状态顺序。
-- `core.model` 负责地面模型；`airborne.model` 从自由悬浮动能独立建立无接触小模型，不读取地面模型矩阵或配平结果。
-- 气弹簧由下位机按当前腿长实时抵消，因此不进入 `A/B/K`；调度器只把导出的主动腿力前馈改为 `FL_U0=F_L,total-F_gas(L)`。
-- `control` 提供不依赖调度策略的通用控制运算。
-- `scheduling` 只组织 L1/L2 配平点扫描、多项式拟合和验证；文件格式由调度模块调用 `artifacts.io` 完成。
-- 生成物必须写到显式 `--output-dir`，不要覆盖源码或参考数据。
+整机参数只在 `src/wheel_leg_lqr/config.py` 维护。各模型读取同一个不可变 `RobotParameters`；独立实验用 `dataclasses.replace()` 创建参数快照，通过 `parameters=` 传入。地面编译缓存以物理参数对象为键。
 
-## 腾空双髋小模型 LQR
+地面 Q/R 在 `models/ground/config.py`，腾空 Q/R 在 `models/airborne/config.py`，接触参数在 `models/contact/config.py`。物理线性化不读取 Q/R；腾空加权形状投影单独位于 `reduction.py`。
 
-腾空阶段使用仅有 `T_p1/T_p2` 两路输入、`beta_1/beta_2/theta` 三角度（含角速度）的六状态模型。运行 `python run_airborne_lqr.py --step 0.01 --output-dir data/generated/airborne_lqr` 生成独立的二维腿长拟合头文件。腾空模型拥有独立的物理参数和 Q/R，计算与拟合不导入地面十四状态 LQR；`--q-diag` 可调节腿角与 pitch 的优先级。动力学推导、十四状态索引、调权示例、部署方法与角动量约束见 [06 腾空双髋小模型 LQR](docs/06_airborne_lqr.md)。
+现有参数的维护入口如下。修改后重新启动计算命令并重新生成产物，无需同步修改测试期望值。
 
-若需评估腾空时伸腿力对 pitch 的影响，可运行 `python run_airborne_fl_pitch.py --body-com-x 0.03 --fl1 100 --fl2 100`。该分析单独启用腿长自由度，输出机体力矩臂和整机无接触瞬时角加速度系数；双髋 LQR 的输入仍只有两路 `T_p`。公式和标称数值见同一份 06 文档。
+| 参数 | 配置文件 |
+|---|---|
+| 质量、惯量、质心、几何、腿长范围、执行器限幅、气弹簧 | `src/wheel_leg_lqr/config.py` |
+| 地面 Q/R、采样周期、配平/分析高度 | `src/wheel_leg_lqr/models/ground/config.py` |
+| 腾空 Q/R、采样周期 | `src/wheel_leg_lqr/models/airborne/config.py` |
+| 接触刚度、阻尼、积分子步数 | `src/wheel_leg_lqr/models/contact/config.py` |
+| RDOB 默认极点/通道带宽、扰动限幅比例 | `src/wheel_leg_lqr/scheduling/config.py` |
 
-## 六阶输入等效 RDOB
+数值回归测试显式使用 `tests/reference_parameters.py` 中的固定机器人与控制器样本，该文件不是实际模型配置。当前配置的传递、缓存和默认行为另有检查；计算命令仍使用当前配置进行稳定性、拟合与饱和恢复验证。
 
-六维扰动观测器默认按实际左右腿长 `L1,L2` 独立二维调度，范围为 `[0.18,0.38]² m²`。`L_bar=(L1+L2)/2` 随腿长变化，不固定为 0.28 m。观测全部六路输入等效扰动，补偿通道在观测器外独立选择。数学推导、采样时序与气弹簧输入约定见 [RDOB 设计说明](docs/input_equivalent_rdob.md)。
+腾空腿力分析默认读取统一质心；`--body-com-x` 用于显式覆盖实验位置。Python 进程启动时读取配置，文件修改后需重新运行命令。
 
-五个调度对象的作用、完整推导、离散更新与 C++ 示例见 [RDOB 设计与实现专题文档](docs/rdob_design_and_implementation.md)。
+气弹簧沿用下位机抵消约定：A/B/K 使用总虚拟腿力，主动腿力前馈减去当前气弹簧力。RDOB 使用实际施加的总输入减配平输入。
 
-```powershell
-python run_rdob.py --step 0.02 --fit-tolerance 0.005 --channel-tolerance 0.01 --sample-time 0.001 --output-dir data/generated/rdob
-```
+## 输出与验证
 
-导出 `rdob_schedule.npz/json`、C++ 纯数据头文件 `rdob_schedule.h` 和验证报告。头文件不生成 `Coefficients` 或 `evaluate()`，只提供腿长范围、`Gamma/Bq` 拟合表及六通道 `rate/z pole/endpoint weight/input gain/velocity scale` 数组；即使当前六路相同也保持独立布局。默认 `D0=0`，六路名义离散极点均约为 `0.992`，按 RDOB 梯形离散反算约为 `1.278353 Hz`。部署参考步进默认将扰动估计限制为对应执行器上限的 `0.1×`，并在限幅后重基准化内部状态。运行时按上一区间系数更新并在端点重基准化辅助状态。冻结点稳定性检查不保证任意变腿长过程稳定。安装后可用同参数的 `wheelleg-rdob` 命令。
+默认写入 `outputs/ground_lqr`、`outputs/airborne_lqr`、`outputs/rdob`。显式 `--output-dir` 优先；相对路径以当前工作目录解析。参考 CAD 目录禁止作为生成物输出路径。
 
-`Gamma` 使用三次全张量直接拟合，`Bq` 使用二维总阶三次直接拟合；`q0` 和总 `u0` 由既有 LQR 调度提供，不在 RDOB 中重复存储。默认矩阵拟合误差不超过 **0.5%**、匹配通道映射误差不超过 **1%**（相对 Frobenius 范数）。全零阻尼矩阵从 C++ 存储与求值中直接消去；常量离散极点和积分权重离线预计算。
-
-保留单点诊断：`python run_rdob.py --mode node --l1 0.24 --l2 0.32 --output-dir data/generated/rdob_node`。单点文件名与调度文件名不同，C++ 调度应包含 `rdob_schedule.h`。
-
-## 前向模型加速度
-
-复用地面模型的 `D0=0` 静态线性化，提取前向加速度行的 4 个状态系数（θ、φ、β1、β2）和 6 个输入系数。实测腿长连续调度使平均腿长偏差为零，因此删除该状态项。10 个通道均按 L1/L2 做**总阶不超过三次**的 10 项拟合，共 100 个 float32（400 字节），不采用三次全张量。
-
-```powershell
-python run_model_acceleration.py --output-dir data/generated/model_acceleration
-```
-
-生成纯数据 C++ 头文件、NPZ 工作点数据、JSON 诊断及误差报告；包括原始模型/float32 镜像、加密网格和随机独立验证。默认最大误差硬门限为 2%，RMS 0.5% 为明确报告的建议目标，超出时不会自动升阶。标量计算、工作点及总输入约定见 [前向模型加速度说明](docs/model_acceleration.md)。安装后可用 `wheelleg-model-acceleration`。
-
-## 测试
+地面调度默认用 25 个代表节点做耗时饱和验证，逐节点验证可用 `--exhaustive-validation`。腾空只验证可控形状子空间，完整模型的两个守恒模态保持中性。RDOB 冻结点检查不等价于任意变腿长过程稳定性保证。
 
 ```powershell
 python -m pytest -p no:cacheprovider -q
 ```
 
-当前参数来自最新 CAD/动力学提交；若修改物理参数，应重新生成 `data/generated` 下的产物并运行完整测试。
-
-## 单腿下台阶接触筛查
-
-wheelleg-step-drop 扩展了静态模型中的地面高度自由度，模拟下降腿释放、低台阶和机械限位的弹簧阻尼接触、双支撑恢复以及 LQR+Tw+FL RDOB 补偿。它用于识别当前控制器无法安全覆盖的过渡；接触刚度和阻尼仍需由实物辨识。0.18 m 台阶的当前结果和建模边界见 docs/step_drop_simulation.md。
+前向模型加速度估计已从新工作区移除。保留动力学加速度、RDOB 和腾空 FL→pitch 分析。

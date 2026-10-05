@@ -1,10 +1,6 @@
 import sympy as sp
 
-from wheel_leg_lqr.symbolic_controllability import (
-    build_nominal_input_matrix,
-    generic_witness,
-    second_order_pbh_matrix,
-)
+from wheel_leg_lqr.analysis.symbolic import build_nominal_input_matrix, generic_witness, second_order_pbh_matrix
 
 
 def test_nominal_input_matrix_has_six_independent_columns():

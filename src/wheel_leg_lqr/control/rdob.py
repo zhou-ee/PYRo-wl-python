@@ -1,4 +1,4 @@
-"""Six-state input-equivalent reduced-order disturbance observer.
+"""Input-equivalent reduced-order disturbance observer.
 
 All vectors use physical SI coordinates. Position and velocity are seven-vectors
 in ``config.STATE_NAMES[::2]`` order, NOT the interleaved 14-state layout.
@@ -12,8 +12,6 @@ from dataclasses import dataclass
 from typing import Protocol
 
 import numpy as np
-
-from ..core.config import N_Q, N_U
 
 
 class RdobUpdateCoefficients(Protocol):
@@ -35,6 +33,7 @@ def trapezoidal_step_constants(
     sample_time: float,
     *,
     dtype=np.float64,
+    channel_count: int | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Return the six-channel constants for the trapezoidal ``z`` update.
 
@@ -48,7 +47,12 @@ def trapezoidal_step_constants(
     scalar_type = np.dtype(dtype).type
     rates = np.asarray(rates_rad_s, dtype=dtype)
     if rates.ndim == 0:
-        rates = np.full(N_U, rates, dtype=dtype)
+        if channel_count is None or channel_count < 1:
+            raise ValueError('scalar rates require a positive channel_count')
+        rates = np.full(channel_count, rates, dtype=dtype)
+    if rates.ndim != 1 or len(rates) < 1:
+        raise ValueError('rates_rad_s must be a nonempty vector')
+    N_U = len(rates)
     if rates.shape != (N_U,) or not np.all(np.isfinite(rates)) or np.any(rates <= 0):
         raise ValueError(f"rates_rad_s must contain {N_U} positive finite values")
     if not np.isfinite(sample_time) or sample_time <= 0:
@@ -126,7 +130,7 @@ def design_rdob(
     damping: np.ndarray | None = None,
     pinv_rcond: float = 1e-12,
 ) -> RdobDesign:
-    """Design for M*qdd + D*qd + K*q = S*(u+d), rank(S)=6.
+    """Design for M*qdd + D*qd + K*q = S*(u+d), S has full column rank.
 
     Use an SVD left inverse rather than normal-equation inversion. A matrix
     that loses a column at the requested SVD tolerance is rejected rather than
@@ -134,6 +138,14 @@ def design_rdob(
     The Euclidean projection refers to the supplied generalized-force
     coordinates; rescaling those coordinates changes the unmatched projection.
     """
+    mass = np.asarray(mass, dtype=float)
+    input_matrix = np.asarray(input_matrix, dtype=float)
+    if mass.ndim != 2 or mass.shape[0] != mass.shape[1] or not len(mass):
+        raise ValueError('mass must be a nonempty square matrix')
+    N_Q = mass.shape[0]
+    if input_matrix.ndim != 2 or input_matrix.shape[0] != N_Q or not 0 < input_matrix.shape[1] <= N_Q:
+        raise ValueError('input_matrix must have shape (coordinates, channels <= coordinates)')
+    N_U = input_matrix.shape[1]
     mass = _array(mass, (N_Q, N_Q), "mass")
     stiffness = _array(stiffness, (N_Q, N_Q), "stiffness")
     input_matrix = _array(input_matrix, (N_Q, N_U), "input_matrix")
@@ -190,6 +202,7 @@ def reconstruct_disturbance(
     design: RdobUpdateCoefficients, z: np.ndarray, delta_velocity: np.ndarray,
 ) -> np.ndarray:
     """Reconstruct six disturbances at the SAME timestamp as z and velocity."""
+    N_U, N_Q = design.gamma.shape
     return (_array(z, (N_U,), "z")
             + design.gamma @ _array(delta_velocity, (N_Q,), "delta_velocity"))
 
@@ -204,6 +217,7 @@ def initialize_rdob(
     with the NEW design and the same physical measurement/estimate. This avoids
     an algebraic jump; it is not a proof of scheduled observer stability.
     """
+    N_U, N_Q = design.gamma.shape
     disturbance = _array(
         np.zeros(N_U) if initial_disturbance is None else initial_disturbance,
         (N_U,), "initial_disturbance",
@@ -218,6 +232,7 @@ def rdob_derivative(
     delta_velocity: np.ndarray, applied_input_delta: np.ndarray,
 ) -> np.ndarray:
     """Continuous acceleration-free derivative, suitable for offline ODEs."""
+    N_U, N_Q = design.gamma.shape
     return (
         -design.rates * _array(z, (N_U,), "z")
         + design.position_gain @ _array(delta_position, (N_Q,), "delta_position")
@@ -239,6 +254,7 @@ def step_rdob(
     All measurements are relative to the SAME frozen trim. No observer leak,
     compensation gain, or saturation is implicitly inserted here.
     """
+    N_U, N_Q = design.gamma.shape
     q0 = _array(previous_delta_position, (N_Q,), "previous_delta_position")
     v0 = _array(previous_delta_velocity, (N_Q,), "previous_delta_velocity")
     q1 = _array(next_delta_position, (N_Q,), "next_delta_position")

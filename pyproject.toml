@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wheel-leg-lqr"
-version = "0.1.0"
+version = "0.2.0"
 description = "Host-side wheel-leg modeling, LQR scheduling, and RDOB generation"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -17,17 +17,18 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["pytest>=8"]
+cad = ["pandas>=2", "openpyxl>=3.1"]
 
 [project.scripts]
-wheelleg-schedule = "wheel_leg_lqr.gain_schedule:main"
-wheelleg-controllability = "wheel_leg_lqr.symbolic_controllability:main"
-wheelleg-bandwidth = "wheel_leg_lqr.analyze_bandwidth:main"
-wheelleg-optimize-qr = "wheel_leg_lqr.optimize_qr:main"
-wheelleg-rdob = "wheel_leg_lqr.rdob:main"
-wheelleg-model-acceleration = "wheel_leg_lqr.model_acceleration:main"
-wheelleg-step-drop = "wheel_leg_lqr.analysis.step_drop:main"
-wheelleg-airborne-lqr = "wheel_leg_lqr.airborne_lqr:main"
-wheelleg-airborne-fl-pitch = "wheel_leg_lqr.airborne.fl_pitch:main"
+wheelleg-fit-leg-com = "wheel_leg_lqr.cli.leg_com:main"
+wheelleg-schedule = "wheel_leg_lqr.cli.ground_lqr:main"
+wheelleg-controllability = "wheel_leg_lqr.cli.symbolic:main"
+wheelleg-bandwidth = "wheel_leg_lqr.cli.bandwidth:main"
+wheelleg-optimize-qr = "wheel_leg_lqr.cli.qr_optimizer:main"
+wheelleg-rdob = "wheel_leg_lqr.cli.rdob:main"
+wheelleg-step-drop = "wheel_leg_lqr.cli.step_drop:main"
+wheelleg-airborne-lqr = "wheel_leg_lqr.cli.airborne_lqr:main"
+wheelleg-airborne-fl-pitch = "wheel_leg_lqr.cli.airborne_fl_pitch:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -1,2 +1,1 @@
-"""Artifact rendering and filesystem utilities."""
-
+"""artifacts component."""

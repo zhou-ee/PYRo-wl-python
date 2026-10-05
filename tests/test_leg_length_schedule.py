@@ -1,17 +1,23 @@
+from tests.reference_parameters import (
+    REFERENCE_GROUND,
+    REFERENCE_ROBOT,
+)
+from wheel_leg_lqr.models.leg_geometry import compute_gas_spring_force
 import numpy as np
-from wheel_leg_lqr import numeric_config as config
-from wheel_leg_lqr.gain_schedule import (
+from wheel_leg_lqr.scheduling.ground_lqr import (
     _float32_fit_metrics,
     compute_active_equilibrium_input,
     compute_gain_node,
     compute_gain_schedule,
     evaluate_fitted_gain,
-    render_header,
 )
+from wheel_leg_lqr.artifacts.ground_lqr import render_header
 
 
 def test_active_u0_subtracts_gas_spring_without_changing_model():
-    node = compute_gain_node(0.23, 0.34)
+    node = compute_gain_node(
+        0.23, 0.34, parameters=REFERENCE_ROBOT, settings=REFERENCE_GROUND
+    )
     active_input = compute_active_equilibrium_input(node)
     np.testing.assert_allclose(
         active_input[:4],
@@ -22,8 +28,8 @@ def test_active_u0_subtracts_gas_spring_without_changing_model():
         active_input[4:],
         node.linearization.equilibrium_input[4:]
         - [
-            config.compute_gas_spring_force(node.l1),
-            config.compute_gas_spring_force(node.l2),
+            compute_gas_spring_force(node.l1, parameters=REFERENCE_ROBOT),
+            compute_gas_spring_force(node.l2, parameters=REFERENCE_ROBOT),
         ],
         atol=1e-12,
     )
@@ -31,7 +37,9 @@ def test_active_u0_subtracts_gas_spring_without_changing_model():
 
 def test_single_node_is_controllable_and_dlqr_stable():
     # Test symmetric nominal node
-    node = compute_gain_node(0.28, 0.28)
+    node = compute_gain_node(
+        0.28, 0.28, parameters=REFERENCE_ROBOT, settings=REFERENCE_GROUND
+    )
     assert node.controllability_rank == 14
     assert np.max(np.abs(node.closed_loop_poles)) < 1.0
     np.testing.assert_allclose(
@@ -41,7 +49,9 @@ def test_single_node_is_controllable_and_dlqr_stable():
     )
 
     # Test asymmetric extreme node (L1 min, L2 max)
-    extreme_node = compute_gain_node(0.18, 0.38)
+    extreme_node = compute_gain_node(
+        0.18, 0.38, parameters=REFERENCE_ROBOT, settings=REFERENCE_GROUND
+    )
     assert extreme_node.controllability_rank == 14
     assert np.max(np.abs(extreme_node.closed_loop_poles)) < 1.0
     np.testing.assert_allclose(
@@ -52,7 +62,9 @@ def test_single_node_is_controllable_and_dlqr_stable():
 
 
 def test_gain_schedule_fit_accuracy_and_float32_stability():
-    result = compute_gain_schedule(step=0.02)  # 11 x 11 = 121 nodes
+    result = compute_gain_schedule(
+        step=0.02, parameters=REFERENCE_ROBOT, settings=REFERENCE_GROUND
+    )  # 11 x 11 = 121 nodes
     assert len(result.nodes) == 121
     assert result.max_raw_spectral_radius < 1.0
     assert result.max_fitted_spectral_radius < 1.0
@@ -68,9 +80,12 @@ def test_left_right_symmetry_at_equal_leg_lengths():
     # When L1 == L2, wheel drive torques on longitudinal velocity must be identical
     # and on yaw velocity must be opposite
     K_sym = evaluate_fitted_gain(
-        compute_gain_schedule(step=0.02).gain_coefficients,
+        compute_gain_schedule(
+            step=0.02, parameters=REFERENCE_ROBOT, settings=REFERENCE_GROUND
+        ).gain_coefficients,
         0.28,
         0.28,
+        parameters=REFERENCE_ROBOT,
     )
     # Tw1 vs Tw2 on state 'x' (index 0)
     np.testing.assert_allclose(K_sym[0, 0], K_sym[1, 0], rtol=1e-3, atol=1e-3)
@@ -79,7 +94,9 @@ def test_left_right_symmetry_at_equal_leg_lengths():
 
 
 def test_header_rendering_format():
-    result = compute_gain_schedule(step=0.04)  # coarse grid for quick test
+    result = compute_gain_schedule(
+        step=0.04, parameters=REFERENCE_ROBOT, settings=REFERENCE_GROUND
+    )  # coarse grid for quick test
     header_text = render_header(result)
     assert "#ifndef __LQR_COEF_H__" in header_text
     assert '#include "stdint.h"' in header_text

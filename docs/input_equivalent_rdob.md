@@ -92,7 +92,7 @@ $$\hat d_{u,k+1}=z_{k+1}+\Gamma v_{k+1}.$$
 ## 4. 配平、气弹簧与时序约定
 
 - 广义坐标顺序：`x, psi, theta, phi, l_bar, beta_1, beta_2`。从现有十四状态提取 `q = state[0::2]`、`v = state[1::2]`；位置要减 `trim_position`。静态配平速度为零。角度增量应在同一局部坐标中保持连续。
-- 当前 `core.model.linearize_static_trim` 没有速度阻尼模型，因此默认 `D0=0`。API 可传完整 7×7 阻尼矩阵，CLI 可传七项对角阻尼。默认值不代表实际阻尼为零，未建模部分可能进入等效扰动。
+- 当前 `models.ground.model.linearize_static_trim` 没有速度阻尼模型，因此默认 `D0=0`。API 可传完整 7×7 阻尼矩阵，CLI 可传七项对角阻尼。默认值不代表实际阻尼为零，未建模部分可能进入等效扰动。
 - 观测器输入是实际施加的总广义输入增量，包含补偿、限幅与执行映射的影响；不能使用未经限幅的 LQR 原始输出。
 - 模型中的 `trim_total_input` 包含总支撑力。若获取的是主动电机折算腿力，应加当前气弹簧模型力后，再减总配平力。导出的 `trim_active_input` 仅作对照，不能将主动/总力混用。气弹簧模型残差会进入扰动估计。
 - 有当前测量时先用当前 `z` 重构扰动并计算控制。在下一次测量到来后，使用上一区间的实际输入调用 `step_rdob`，得到与新测量同一时刻的 `z` 和扰动。
@@ -104,7 +104,7 @@ $$\hat d_{u,k+1}=z_{k+1}+\Gamma v_{k+1}.$$
 ## 5. 使用方式
 
 ```powershell
-python run_rdob.py --step 0.02 --fit-tolerance 0.005 --channel-tolerance 0.01 --sample-time 0.001 --output-dir data/generated/rdob
+python scripts/run_rdob.py --step 0.02 --fit-tolerance 0.005 --channel-tolerance 0.01 --sample-time 0.001 --output-dir outputs/rdob
 ```
 
 安装项目后也可使用 `wheelleg-rdob`，参数相同。默认值按 RDOB 的梯形离散公式反算，使六路名义离散扰动极点均为 `0.992`；该值只是初始带宽配置，仍需结合传感器噪声、执行器动态与实机数据整定。
@@ -114,7 +114,7 @@ python run_rdob.py --step 0.02 --fit-tolerance 0.005 --channel-tolerance 0.01 --
 需要单点诊断时显式选择：
 
 ```powershell
-python run_rdob.py --mode node --l1 0.24 --l2 0.32 --output-dir data/generated/rdob_node
+python scripts/run_rdob.py --mode node --l1 0.24 --l2 0.32 --output-dir outputs/rdob_node
 ```
 
 单点模式生成：
@@ -127,7 +127,7 @@ python run_rdob.py --mode node --l1 0.24 --l2 0.32 --output-dir data/generated/r
 Python 接口：
 
 ```python
-from wheel_leg_lqr.rdob import compute_rdob_node
+from wheel_leg_lqr.scheduling.rdob_node import compute_rdob_node
 from wheel_leg_lqr.control.rdob import initialize_rdob, reconstruct_disturbance, step_rdob
 
 node = compute_rdob_node(0.28, 0.28)
@@ -171,7 +171,7 @@ L1、L2 各自映射到 `[-1,1]`；状态和输入保留 SI 坐标。Gamma 的�
 上位机运行时接口：
 
 ```python
-from wheel_leg_lqr.scheduling.rdob_schedule import compute_rdob_schedule, step_scheduled_rdob
+from wheel_leg_lqr.scheduling.rdob import compute_rdob_schedule, step_scheduled_rdob
 from wheel_leg_lqr.control.rdob import initialize_rdob
 
 schedule = compute_rdob_schedule()  # 离线设计一次

@@ -1,2 +1,1 @@
-"""Offline model and controller analyses."""
-
+"""analysis component."""

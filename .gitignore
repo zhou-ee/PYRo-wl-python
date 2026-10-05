@@ -10,3 +10,8 @@ dist/
 # Generated artifacts (created on demand; not part of the reference snapshot)
 data/generated/
 data/generated_corrected/
+
+# Local generated outputs and environments
+outputs/**
+!outputs/README.md
+.venv/
