@@ -4,6 +4,8 @@
 
 原始 Excel 在 `data/reference/清洗后重心.xlsx`。安装 `pip install -e ".[cad]"` 启用 pandas/openpyxl；基础建模导入不读取 Excel。拟合结果需要人工核对数据来源后更新公共配置，不自动覆盖正在使用的参数。
 
+`x_com`、`poly_x` 和质心偏角始终保留 CAD 原始数据及拟合。`beta_eq`、`poly_beta_eq` 遵循公共配置的 `leg_com_fore_aft_enabled`：关闭时使用零前后偏移，平衡角为零。命令行报告明确区分 CAD 曲线与模型开关状态。
+
 ## 依赖边界
 
 读取公共参数和参考数据；Excel 依赖延迟到拟合调用时加载。

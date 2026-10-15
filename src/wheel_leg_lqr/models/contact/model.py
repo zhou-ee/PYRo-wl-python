@@ -66,7 +66,7 @@ def _raw_kinematics(q: np.ndarray, parameters: RobotParameters = DEFAULT_ROBOT) 
             + np.array([0.0, sign * (p.wheel_half_track - p.hip_half_track), z_c])
         )
         l_wp = np.polynomial.polynomial.polyval(length, p.leg_com_lwp_poly)
-        x_com = np.polynomial.polynomial.polyval(length, p.leg_com_x_poly)
+        x_com = np.polynomial.polynomial.polyval(length, p.effective_leg_com_x_poly)
         normal = np.array([np.cos(beta), 0.0, np.sin(beta)])
         leg_positions.append(
             lower_pivot

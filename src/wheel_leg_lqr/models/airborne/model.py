@@ -75,9 +75,9 @@ def airborne_generalized_mass(
 
     for index, (length, beta) in enumerate(zip(lengths, angles)):
         l_wp = _poly(p.leg_com_lwp_poly, length)
-        x_com = _poly(p.leg_com_x_poly, length)
+        x_com = _poly(p.effective_leg_com_x_poly, length)
         l_wp_prime = _poly_derivative(p.leg_com_lwp_poly, length)
-        x_com_prime = _poly_derivative(p.leg_com_x_poly, length)
+        x_com_prime = _poly_derivative(p.effective_leg_com_x_poly, length)
         leg_from_hip = length - l_wp
         leg_from_hip_prime = 1.0 - l_wp_prime
         wheel_jacobian = np.zeros((2, 5), dtype=float)

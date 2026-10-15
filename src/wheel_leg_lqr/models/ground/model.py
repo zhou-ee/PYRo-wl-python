@@ -134,10 +134,10 @@ def _compile_model(parameters: RobotParameters = DEFAULT_ROBOT) -> _CompiledMode
             + sp.Float(p.leg_com_lwp_poly[3]) * length**3
         )
         x_com = (
-            sp.Float(p.leg_com_x_poly[0])
-            + sp.Float(p.leg_com_x_poly[1]) * length
-            + sp.Float(p.leg_com_x_poly[2]) * length**2
-            + sp.Float(p.leg_com_x_poly[3]) * length**3
+            sp.Float(p.effective_leg_com_x_poly[0])
+            + sp.Float(p.effective_leg_com_x_poly[1]) * length
+            + sp.Float(p.effective_leg_com_x_poly[2]) * length**2
+            + sp.Float(p.effective_leg_com_x_poly[3]) * length**3
         )
         normal_direction = sp.Matrix([sp.cos(beta), 0, sp.sin(beta)])
         leg_com = lower_pivot + l_wp * direction + x_com * normal_direction

@@ -6,6 +6,8 @@
 
 `trim.py`：`compute_equilibrium_beta_from_length()`、高度配平角和 `fit_equilibrium_beta()`。固件平衡角曲线从当前物理参数重新拟合，避免与质量修改不同步。
 
+平衡腿角采用 `atan(mp*x_com / (mb*L/2 + mp*L_wp))`。统一配置中关闭 `leg_com_fore_aft_enabled` 后，`x_com=0`，各腿长的平衡角及导出 `BETA_TRIM_POLY_COEF` 均为零；`L_wp(L)` 保持原曲线。配平输入、A/B/K 也按关闭后的物理模型重新计算。
+
 状态：`x,dx,psi,dpsi,theta,dtheta,phi,dphi,l_bar,dl_bar,beta_1,dbeta_1,beta_2,dbeta_2`。输入：`T_w1,T_w2,T_p1,T_p2,f_l1,f_l2`。位移/腿长 m，角度 rad，力矩 N·m，腿力 N。
 
 虚拟腿力是腿长坐标的共轭力，不等于整机地面支撑力；轮高度固定，腿质心随伸缩的运动比例由 CAD 曲线决定。

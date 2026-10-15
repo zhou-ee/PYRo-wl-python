@@ -6,7 +6,7 @@ def leg_com(length, parameters: RobotParameters = DEFAULT_ROBOT):
     def evaluate(coefficients):
         return (coefficients[0] + coefficients[1] * length
                 + coefficients[2] * length**2 + coefficients[3] * length**3)
-    return evaluate(parameters.leg_com_lwp_poly), evaluate(parameters.leg_com_x_poly)
+    return evaluate(parameters.leg_com_lwp_poly), evaluate(parameters.effective_leg_com_x_poly)
 
 def ground_inertia_com_coefficients(parameters: RobotParameters = DEFAULT_ROBOT):
     """Keep the original ground/contact rod-inertia approximation (4 decimal places)."""

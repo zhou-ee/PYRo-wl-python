@@ -29,6 +29,26 @@ from wheel_leg_lqr.models.airborne.model import compute_leg_force_pitch_effect
 from wheel_leg_lqr.scheduling.ground_lqr import evaluate_fitted_gain
 
 
+def test_configured_body_inertia_respects_fore_aft_and_left_right_symmetry():
+    inertia = np.asarray(DEFAULT_ROBOT.body_inertia)
+    for reflection in (np.diag([-1.0, 1.0, 1.0]), np.diag([1.0, -1.0, 1.0])):
+        np.testing.assert_array_equal(reflection @ inertia @ reflection.T, inertia)
+    # Constant pure yaw of a symmetric, upright body needs no pitch/roll bias.
+    omega = np.array([0.0, 0.0, 12.0])
+    np.testing.assert_array_equal(np.cross(omega, inertia @ omega), np.zeros(3))
+
+
+def test_symmetric_nominal_ground_removes_yaw_body_coupling_but_keeps_joint_coupling():
+    robot = replace(DEFAULT_ROBOT, leg_com_fore_aft_enabled=False)
+    length = (robot.min_leg_length + robot.max_leg_length) / 2
+    node = compute_gain_node(length, length, parameters=robot)
+    mass = node.linearization.mass
+    np.testing.assert_allclose(mass[1, [2, 3]], 0.0, atol=1e-12)
+    assert abs(mass[2, 5]) > 1e-3
+    assert np.min(np.linalg.eigvalsh(mass)) > 0.0
+    assert np.max(np.abs(node.closed_loop_poles)) < 1.0
+
+
 @pytest.mark.parametrize("mass,com_x", [(12.0, 0.0), (23.0, 0.045)])
 def test_pitch_analysis_uses_supplied_physical_config(mass, com_x):
     robot = replace(DEFAULT_ROBOT, body_mass=mass, body_com_from_hip=(com_x, 0.0, 0.04))

@@ -2,6 +2,9 @@
 
 These values describe the tested reference robot, not the active robot config.
 Changing config.py must not change this sample or its numerical expectations.
+
+The historical sample deliberately retains the pre-correction nonzero Ixz;
+it is not the symmetric-body hardware configuration used by DEFAULT_ROBOT.
 """
 
 import numpy as np
@@ -27,6 +30,7 @@ REFERENCE_ROBOT = RobotParameters(
     max_leg_length=0.38,
     leg_com_lwp_poly=(0.05806884, 0.37602793, 0.79724260, -0.73809850),
     leg_com_x_poly=(-0.07916397, 0.03685243, -0.12886076, 0.69820022),
+    leg_com_fore_aft_enabled=True,
     gas_spring_length_center=0.28,
     gas_spring_length_scale=0.10,
     gas_spring_force_poly=(

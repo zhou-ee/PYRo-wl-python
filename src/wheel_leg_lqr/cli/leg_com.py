@@ -14,6 +14,9 @@ def main() -> None:
     print("=" * 80)
     print("              双轮足腿部质心偏移多项式拟合结果与评估报告")
     print("=" * 80)
+    mode = "开启" if DEFAULT_ROBOT.leg_com_fore_aft_enabled else "关闭（模型 x_com = 0）"
+    print(f"模型前后质心调度：{mode}；beta_eq 按此模式计算。")
+    print("下列 x_com、alpha_P 为原始 CAD 拟合，关闭开关时仍保留供参考。")
     print("\n1. 拟合多项式系数 (升幂排列: c0 + c1*L + c2*L^2 + c3*L^3):")
     print(f"   L_wp(L)   [m]   = {res['poly_wp'][0]:.8f} + ({res['poly_wp'][1]:.8f})*L + ({res['poly_wp'][2]:.8f})*L^2 + ({res['poly_wp'][3]:.8f})*L^3")
     print(f"   x_com(L)  [m]   = {res['poly_x'][0]:.8f} + ({res['poly_x'][1]:.8f})*L + ({res['poly_x'][2]:.8f})*L^2 + ({res['poly_x'][3]:.8f})*L^3")
@@ -36,7 +39,8 @@ def main() -> None:
         lwp_val = np.polyval(res["poly_wp"][::-1], L_val)
         xcom_val = np.polyval(res["poly_x"][::-1], L_val)
         alpha_val = np.polyval(res["poly_alpha_P"][::-1], L_val)
-        beta_val = np.arctan((DEFAULT_ROBOT.leg_mass * xcom_val) / (DEFAULT_ROBOT.body_mass * L_val / 2.0 + DEFAULT_ROBOT.leg_mass * lwp_val))
+        model_xcom_val = xcom_val if DEFAULT_ROBOT.leg_com_fore_aft_enabled else 0.0
+        beta_val = np.arctan((DEFAULT_ROBOT.leg_mass * model_xcom_val) / (DEFAULT_ROBOT.body_mass * L_val / 2.0 + DEFAULT_ROBOT.leg_mass * lwp_val))
         print(
             f"{L_val:8.3f} | {lwp_val*1000:10.2f} | {xcom_val*1000:10.2f} | "
             f"{np.degrees(alpha_val):14.4f} | {np.degrees(beta_val):14.4f} | {beta_val:14.6f}"

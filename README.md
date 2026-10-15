@@ -69,6 +69,8 @@ wheelleg-fit-leg-com
 
 腾空腿力分析默认读取统一质心；`--body-com-x` 用于显式覆盖实验位置。Python 进程启动时读取配置，文件修改后需重新运行命令。
 
+腿部前后质心调度开关位于统一 `config.py` 的 `RobotParameters.leg_com_fore_aft_enabled`，默认 `True`，保留 CAD 前后偏移曲线。设为 `False` 时，模型令 `x_com(L)=0`，腿质心在腿部矢状平面内始终位于髋—轮连线上；沿腿方向的 `L_wp(L)` 仍随腿长变化。地面配平、腾空、接触和导出的平衡腿角均采用此开关；当前配平公式下关闭后的平衡腿角为零。原始 CAD 曲线保留，重新开启即可恢复。切换后重新运行所需计算命令，生成对应的 K、前馈、RDOB 和固件头文件。
+
 气弹簧沿用下位机抵消约定：A/B/K 使用总虚拟腿力，主动腿力前馈减去当前气弹簧力。RDOB 使用实际施加的总输入减配平输入。
 
 ## 输出与验证
@@ -82,3 +84,5 @@ python -m pytest -p no:cacheprovider -q
 ```
 
 前向模型加速度估计已从新工作区移除。保留动力学加速度、RDOB 和腾空 FL→pitch 分析。
+
+原代码库与新工作区的同参数数值验证见 [迁移对照报告](docs/migration_comparison.md)。

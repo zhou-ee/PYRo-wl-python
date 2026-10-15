@@ -15,16 +15,22 @@ class RobotParameters:
     hip_half_track: float = 0.158
     wheel_half_track: float = 0.20025
     body_com_from_hip: tuple[float, float, float] = (0.0, 0.0, 0.032)
+    # 机体质量分布前后、左右对称；质心坐标轴沿对称方向。
+    # CAD 导出的非对角惯量为误差，Ixy/Ixz/Iyz 均置零。
+    # 模型导出后 * 1.5得到
     body_inertia: tuple[tuple[float, ...], ...] = (
-        (0.418395663, 0.0, -0.026043600),
+        (0.418395663, 0.0, 0.0),
         (0.0, 0.582892610, 0.0),
-        (-0.026043600, 0.0, 0.451416848),
+        (0.0, 0.0, 0.451416848),
     )
     gravity: float = 9.81
     min_leg_length: float = 0.18
     max_leg_length: float = 0.38
     leg_com_lwp_poly: tuple[float, ...] = (0.05806884, 0.37602793, 0.79724260, -0.73809850)
     leg_com_x_poly: tuple[float, ...] = (-0.07916397, 0.03685243, -0.12886076, 0.69820022)
+    # 前后质心调度开关；False 时质心在腿部矢状平面的髋—轮连线上。
+    # 沿腿方向的 leg_com_lwp_poly 仍随腿长变化，原始 x 曲线保留。
+    leg_com_fore_aft_enabled: bool = True
     gas_spring_length_center: float = 0.28
     gas_spring_length_scale: float = 0.10
     gas_spring_force_poly: tuple[float, ...] = (
@@ -36,11 +42,15 @@ class RobotParameters:
     leg_force_limit_n: float = 300.0
 
     def __post_init__(self):
+        if not isinstance(self.leg_com_fore_aft_enabled, bool):
+            raise ValueError('leg_com_fore_aft_enabled must be a bool')
         # Normalize sequence inputs before hashing/caching; frozen also applies to nested data.
         for name in ('body_com_from_hip', 'leg_com_lwp_poly', 'leg_com_x_poly', 'gas_spring_force_poly'):
             object.__setattr__(self, name, tuple(float(v) for v in getattr(self, name)))
         object.__setattr__(self, 'body_inertia', tuple(tuple(float(v) for v in row) for row in self.body_inertia))
         for name, value in asdict(self).items():
+            if name == 'leg_com_fore_aft_enabled':
+                continue
             if isinstance(value, (float, int)) and (not np.isfinite(value) or value <= 0):
                 raise ValueError(f'{name} must be positive and finite')
         if self.max_leg_length <= self.min_leg_length:
@@ -55,6 +65,11 @@ class RobotParameters:
         for name in ('leg_com_lwp_poly', 'leg_com_x_poly', 'gas_spring_force_poly'):
             if len(getattr(self, name)) != 4 or not np.all(np.isfinite(getattr(self, name))):
                 raise ValueError(f'{name} must contain four finite cubic coefficients')
+
+    @property
+    def effective_leg_com_x_poly(self) -> tuple[float, ...]:
+        """Active fore-aft COM curve; retain the CAD curve when disabled."""
+        return self.leg_com_x_poly if self.leg_com_fore_aft_enabled else (0.0,) * 4
 
     @property
     def body_pitch_inertia(self):

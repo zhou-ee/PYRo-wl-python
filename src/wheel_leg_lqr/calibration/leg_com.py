@@ -48,7 +48,8 @@ def fit_leg_com_data(excel_path: Path = EXCEL_PATH, parameters: RobotParameters 
     # tan(beta_eq) = (mp * x_com) / (mb * L / 2 + mp * L_wp)
     mb = parameters.body_mass
     mp = parameters.leg_mass
-    beta_eq = np.arctan((mp * x_com) / (mb * L / 2.0 + mp * L_wp))
+    model_x_com = x_com if parameters.leg_com_fore_aft_enabled else np.zeros_like(x_com)
+    beta_eq = np.arctan((mp * model_x_com) / (mb * L / 2.0 + mp * L_wp))
     poly_beta_eq = np.polyfit(L, beta_eq, 3)[::-1]
     err_beta_eq = np.abs(np.polyval(poly_beta_eq[::-1], L) - beta_eq)
 
