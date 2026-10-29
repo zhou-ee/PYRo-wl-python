@@ -22,6 +22,7 @@ cad = ["pandas>=2", "openpyxl>=3.1"]
 [project.scripts]
 wheelleg-fit-leg-com = "wheel_leg_lqr.cli.leg_com:main"
 wheelleg-schedule = "wheel_leg_lqr.cli.ground_lqr:main"
+wheelleg-ground10-lqr = "wheel_leg_lqr.cli.ground10_lqr:main"
 wheelleg-controllability = "wheel_leg_lqr.cli.symbolic:main"
 wheelleg-bandwidth = "wheel_leg_lqr.cli.bandwidth:main"
 wheelleg-optimize-qr = "wheel_leg_lqr.cli.qr_optimizer:main"

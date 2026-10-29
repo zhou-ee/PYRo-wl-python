@@ -2,6 +2,8 @@
 
 `ground_lqr/`、`airborne_lqr/`、`rdob/` 分别保存控制器生成物。其他诊断可指定独立子目录。
 
+`ground10_lqr/` 保存独立十状态单点与调度结果：`ground10_node.json`、`ground10_gain_nodes.npz`、`ground10_gain_fit.json`、`ground10_lqr_coef.h`。该头文件为四输入、十状态，使用独立命名空间 `wheel_leg_ground10`；其建模假设见模型组件 README。
+
 头文件用于固件集成，NPZ 用于数值复核，JSON/Markdown 保存参数与验证摘要。参数改变后重新生成，核对参数指纹。生成物不提交 Git。
 
 ## 依赖边界

@@ -5,6 +5,7 @@
 | `src/wheel_leg_lqr` | [建模包与统一物理配置](src/wheel_leg_lqr/README.md) |
 | `src/wheel_leg_lqr/models` | [物理模型](src/wheel_leg_lqr/models/README.md) |
 | `src/wheel_leg_lqr/models/ground` | [地面双支撑模型](src/wheel_leg_lqr/models/ground/README.md) |
+| `src/wheel_leg_lqr/models/ground10` | [十状态固定腿长模型](src/wheel_leg_lqr/models/ground10/README.md) |
 | `src/wheel_leg_lqr/models/airborne` | [腾空双髋模型](src/wheel_leg_lqr/models/airborne/README.md) |
 | `src/wheel_leg_lqr/models/contact` | [释放与碰撞接触模型](src/wheel_leg_lqr/models/contact/README.md) |
 | `src/wheel_leg_lqr/control` | [通用控制算法](src/wheel_leg_lqr/control/README.md) |

@@ -13,6 +13,8 @@ python -m pip install -e ".[test]"
 python -m pip install -e ".[cad]"
 
 wheelleg-schedule --step 0.02
+wheelleg-ground10-lqr --step 0.02
+wheelleg-ground10-lqr --mode node --l1 0.24 --l2 0.32
 wheelleg-airborne-lqr --step 0.02
 wheelleg-rdob --step 0.02
 wheelleg-rdob --mode node --l1 0.24 --l2 0.32
@@ -35,6 +37,7 @@ wheelleg-fit-leg-com
 | [统一配置与包入口](src/wheel_leg_lqr/README.md) | 整机质量、惯量、几何、质心曲线、被动机构与执行器参数 |
 | [物理模型](src/wheel_leg_lqr/models/README.md) | 共享物理数据，独立建立各接触模式的方程 |
 | [地面模型](src/wheel_leg_lqr/models/ground/README.md) | 七坐标、十四状态、六输入，配平与地面 Q/R |
+| [十状态地面模型](src/wheel_leg_lqr/models/ground10/README.md) | 固定腿长、无 roll 的独立五坐标近似，四输入与独立 Q/R |
 | [腾空模型](src/wheel_leg_lqr/models/airborne/README.md) | 六状态、双髋输入、四维可控形状空间 |
 | [接触模型](src/wheel_leg_lqr/models/contact/README.md) | 九坐标释放、地面碰撞和机械限位 |
 | [通用控制](src/wheel_leg_lqr/control/README.md) | 显式 Q/R、采样时间与任意维数的 LQR/RDOB |
@@ -61,6 +64,7 @@ wheelleg-fit-leg-com
 |---|---|
 | 质量、惯量、质心、几何、腿长范围、执行器限幅、气弹簧 | `src/wheel_leg_lqr/config.py` |
 | 地面 Q/R、采样周期、配平/分析高度 | `src/wheel_leg_lqr/models/ground/config.py` |
+| 十状态地面 Q/R、采样周期 | `src/wheel_leg_lqr/models/ground10/config.py` |
 | 腾空 Q/R、采样周期 | `src/wheel_leg_lqr/models/airborne/config.py` |
 | 接触刚度、阻尼、积分子步数 | `src/wheel_leg_lqr/models/contact/config.py` |
 | RDOB 默认极点/通道带宽、扰动限幅比例 | `src/wheel_leg_lqr/scheduling/config.py` |
@@ -76,6 +80,8 @@ wheelleg-fit-leg-com
 ## 输出与验证
 
 默认写入 `outputs/ground_lqr`、`outputs/airborne_lqr`、`outputs/rdob`。显式 `--output-dir` 优先；相对路径以当前工作目录解析。参考 CAD 目录禁止作为生成物输出路径。
+
+十状态入口为 `python scripts/run_ground10_lqr.py`，默认输出到 `outputs/ground10_lqr`；`--mode node --l1 0.24 --l2 0.32` 输出单点 A/B/K。其状态为 `x,yaw,pitch,beta_1,beta_2` 及各自导数，输入仅为双轮和双髋力矩。L1/L2 作为外部调度参数，在能量求导前固定；采用平均髋高的局部平衡近似，详见组件 README 的几何假设和推导。
 
 地面调度默认用 25 个代表节点做耗时饱和验证，逐节点验证可用 `--exhaustive-validation`。腾空只验证可控形状子空间，完整模型的两个守恒模态保持中性。RDOB 冻结点检查不等价于任意变腿长过程稳定性保证。
 

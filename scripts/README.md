@@ -22,6 +22,7 @@ python E:\Software\Develop\RM\Wheel_leg\PYRo-wl-python\scripts\run_rdob.py --mod
 | [run_analyze_bandwidth.py](run_analyze_bandwidth.py) |  |
 | [run_controllability.py](run_controllability.py) |  |
 | [run_gain_schedule.py](run_gain_schedule.py) |  |
+| [run_ground10_lqr.py](run_ground10_lqr.py) | 十状态单点建模或四输入 LQR 腿长调度 |
 | [run_optimize_qr.py](run_optimize_qr.py) |  |
 | [run_rdob.py](run_rdob.py) |  |
 | [run_step_drop.py](run_step_drop.py) |  |

@@ -4,6 +4,8 @@
 
 入口：`ground_lqr`、`airborne_lqr`、`rdob`、`symbolic`、`bandwidth`、`qr_optimizer`、`step_drop`、`airborne_fl_pitch`、`leg_com`。`--output-dir` 覆盖默认输出路径，命令行不会等待 Enter。
 
+`ground10_lqr` 为新增十状态独立入口（`wheelleg-ground10-lqr`）：默认生成腿长调度，`--mode node --l1 0.24 --l2 0.32` 生成单点矩阵和增益，默认输出到 `outputs/ground10_lqr`。
+
 ## 依赖边界
 
 CLI 组装计算、分析与导出；下层不导入 CLI。
@@ -24,6 +26,7 @@ python -m wheel_leg_lqr.cli.rdob --mode node --l1 0.24 --l2 0.32
 | [airborne_lqr.py](airborne_lqr.py) | `main` |
 | [bandwidth.py](bandwidth.py) | `main` |
 | [ground_lqr.py](ground_lqr.py) | `main` |
+| [ground10_lqr.py](ground10_lqr.py) | `main`，十状态单点或腿长调度 |
 | [leg_com.py](leg_com.py) | `main` |
 | [qr_optimizer.py](qr_optimizer.py) | `main` |
 | [rdob.py](rdob.py) | `main` |

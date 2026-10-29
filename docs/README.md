@@ -4,6 +4,8 @@
 
 组件接口以各目录 README 和源码为准；历史专题中的实验数值只对其记录的参数快照有效。
 
+十状态固定腿长建模的状态契约、平均髋高假设、独立能量推导及与十四状态的耦合边界，见 [十状态模型 README](../src/wheel_leg_lqr/models/ground10/README.md)。
+
 最新等参回归对照见 [migration_comparison.md](migration_comparison.md)，可复现工具见 [validation/README.md](validation/README.md)。
 
 机体前后、左右对称对应的 CAD 惯量导出误差修正见 [body_symmetry_correction.md](body_symmetry_correction.md)。该参数修正发生在迁移对照之后，与保留历史参数的迁移等参验证分别记录。

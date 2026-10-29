@@ -11,7 +11,7 @@ class RobotParameters:
     wheel_rolling_inertia: float = 0.000596
     wheel_radius: float = 0.06
     leg_mass: float = 1.232
-    body_mass: float = 18.9255
+    body_mass: float = 12.0 #18.9255
     hip_half_track: float = 0.158
     wheel_half_track: float = 0.20025
     body_com_from_hip: tuple[float, float, float] = (0.0, 0.0, 0.032)
@@ -19,10 +19,22 @@ class RobotParameters:
     # CAD 导出的非对角惯量为误差，Ixy/Ixz/Iyz 均置零。
     # 模型导出后 * 1.5得到
     body_inertia: tuple[tuple[float, ...], ...] = (
-        (0.418395663, 0.0, 0.0),
-        (0.0, 0.582892610, 0.0),
-        (0.0, 0.0, 0.451416848),
+        (0.173525859, 0.0, 0.0),
+        (0.0, 0.256537589, 0.0),
+        (0.0, 0.0, 0.347905209),
     )
+
+    # body_inertia: np.ndarray = field(
+    #     default_factory=lambda: np.array(
+    #         [
+    #             [0.173525859, 0.0, 0.011609366],
+    #             [0.0, 0.256537589, 0.0],
+    #             [0.011609366, 0.0, 0.347905209],
+    #         ],
+    #         dtype=float,
+    #     )
+    # )
+
     gravity: float = 9.81
     min_leg_length: float = 0.18
     max_leg_length: float = 0.38

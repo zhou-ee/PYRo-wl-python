@@ -4,6 +4,8 @@
 
 `ground_lqr.py`：单点地面控制器与增益调度，结果节点保存物理参数和 `GroundSettings`，验证默认选取 25 个代表节点做饱和恢复。
 
+`ground10_lqr.py`：独立十状态模型的四输入 LQR、L1/L2 张量拟合、网格/单元中心 float32 稳定性与代表节点饱和恢复。只读取 `models/ground10` 的物理模型和控制配置，不复用十四状态调度。输出携带精确节点配平、独立平衡角拟合及统一参数指纹。
+
 `airborne_lqr.py`：形状 LQR、双腿长增益拟合、网格及单元中心 float32 验证。结果保存物理参数、实际 Q/R 和采样时间。独立系数求值可显式提供 `lower/upper`。
 
 `config.py`：RDOB 默认极点、六通道带宽及扰动限幅比例。`rdob_node.py`：六通道单点设计；`rdob.py`：Gamma 张量三次、Bq 总阶三次、系数更新/重基准化和冻结点闭环检查。RDOB 的 q0/u0 由调用者提供，默认扰动限幅根据调度保存的硬件参数推导，避免与全局默认机器人混用。
@@ -32,6 +34,7 @@ print(ground.gain.shape, air.gain.shape)
 | [airborne_lqr.py](airborne_lqr.py) | `AirborneGainNode`, `AirborneScheduleFit`, `make_leg_length_grid`, `compute_airborne_gain_node`, `evaluate_airborne_gain`, `compute_airborne_schedule` |
 | [domain.py](domain.py) | `make_leg_length_grid`, `LengthDomain` |
 | [ground_lqr.py](ground_lqr.py) | `GainNode`, `GainScheduleFit`, `compute_gain_node`, `compute_active_equilibrium_input`, `evaluate_fitted_gain`, `compute_gain_schedule` |
+| [ground10_lqr.py](ground10_lqr.py) | `compute_gain_node`, `compute_gain_schedule`, `evaluate_polynomial`, `input_limits` |
 | [polynomial.py](polynomial.py) | `fit_total_cubic_coefficients`, `evaluate_total_cubic_polynomial`, `tensor_design_matrix`, `fit_tensor_coefficients`, `evaluate_tensor_polynomial` |
 | [rdob.py](rdob.py) | `DirectPolynomialFit`, `RdobSchedulePoint`, `RdobSchedule`, `frozen_closed_loop_matrix`, `compute_rdob_schedule`, `step_scheduled_rdob`, `runtime_accounting` |
 | [rdob_node.py](rdob_node.py) | `RdobNode`, `compute_rdob_node`, `rdob_diagnostics` |

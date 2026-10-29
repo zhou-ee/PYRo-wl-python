@@ -10,6 +10,8 @@
 
 Q/R 和状态顺序分别维护在 `models/ground/config.py`、`models/airborne/config.py`。公共物理配置不保存控制权重、RDOB 带宽和拟合阶数。
 
+十状态地面模型的 Q/R 和采样周期独立维护在 `models/ground10/config.py`；物理参数及前后质心开关继续读取本层 `config.py`。新增入口和平均髋高局部近似见 [十状态组件 README](models/ground10/README.md)。
+
 `leg_com_fore_aft_enabled=True` 启用前后质心曲线。改为 `False` 后，派生属性 `effective_leg_com_x_poly` 返回零系数，所有模型统一使用零前后偏移，原始 `leg_com_x_poly` 保留。沿腿的 `leg_com_lwp_poly` 不受开关影响，仍随腿长变化。开关参与参数快照、指纹和地面编译缓存键；切换后需重新启动计算、重新生成产物。
 
 ## 依赖边界
